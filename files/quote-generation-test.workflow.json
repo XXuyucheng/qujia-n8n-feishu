@@ -1,0 +1,57 @@
+{
+  "id": "qgenQuoteTest01",
+  "name": "报价生成-测试",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "feishu/quote-test",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "83f3f64b-c255-46e4-bd35-c0e8ed78e9fd",
+      "name": "Feishu Listener Webhook",
+      "webhookId": "d7288a2d-6fd1-4dc8-a330-85eea6b734b3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body || $json;\nconst event = payload.event || payload;\nconst resource = event.resource || {};\nconst rawEvent = event.raw?.event || {};\nconst actions = Array.isArray(rawEvent.action_list) ? rawEvent.action_list : [];\n\nfunction parseMaybeJson(value) {\n  if (typeof value !== 'string') return value;\n  const text = value.trim();\n  if (!text) return '';\n  if (!['{', '['].includes(text[0])) return text;\n  try {\n    return JSON.parse(text);\n  } catch {\n    return text;\n  }\n}\n\nfunction collectText(value) {\n  const parsed = parseMaybeJson(value);\n  if (parsed === null || parsed === undefined) return [];\n  if (typeof parsed === 'string' || typeof parsed === 'number' || typeof parsed === 'boolean') {\n    const text = String(parsed).trim();\n    return text ? [text] : [];\n  }\n  if (Array.isArray(parsed)) {\n    return parsed.flatMap(collectText).filter(Boolean);\n  }\n  if (typeof parsed === 'object') {\n    if (Array.isArray(parsed.users)) {\n      return parsed.users.flatMap(user => collectText(user?.name || user?.enName || user?.userId));\n    }\n    if (Array.isArray(parsed.data)) {\n      return parsed.data.flatMap(collectText).filter(Boolean);\n    }\n    if (parsed.text !== undefined) return collectText(parsed.text);\n    if (parsed.name !== undefined) return collectText(parsed.name);\n    if (parsed.value !== undefined) return collectText(parsed.value);\n  }\n  return [];\n}\n\nfunction unique(values) {\n  return [...new Set(values.map(value => String(value).trim()).filter(Boolean))];\n}\n\nfunction fieldText(fieldId) {\n  const values = [];\n  for (const action of actions) {\n    const afterValues = Array.isArray(action.after_value) ? action.after_value : [];\n    for (const field of afterValues) {\n      if (String(field.field_id || '') !== fieldId) continue;\n      values.push(...collectText(field.field_identity_value));\n      values.push(...collectText(field.field_value));\n    }\n  }\n  return unique(values).join('；');\n}\n\nconst result = {\n  record_id: resource.record_id || '',\n  table_id: resource.table_id || '',\n  客户需求: fieldText('fldsuKm8jW'),\n  联系人: fieldText('fld1QdGtzJ'),\n  联系方式: fieldText('fld3d5yFvP'),\n  单位: fieldText('fldG4YOiIT'),\n  策划师: fieldText('fld6UQO969'),\n};\n\nresult.code = [\n  '报价基础数据',\n  `客户需求：${result.客户需求}`,\n  `联系人：${result.联系人}`,\n  `联系方式：${result.联系方式}`,\n  `单位：${result.单位}`,\n  `策划师：${result.策划师}`,\n].join('\\n');\n\nreturn [{ json: result }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "d2201902-96be-4f19-a147-2d31ab9c7f3c",
+      "name": "汇总报价基础数据"
+    }
+  ],
+  "connections": {
+    "Feishu Listener Webhook": {
+      "main": [
+        [
+          {
+            "node": "汇总报价基础数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": []
+}

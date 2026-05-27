@@ -1,0 +1,46 @@
+{
+  "route_name": "quote-generation-test-bitable-record-changed",
+  "event": {
+    "resource": {
+      "table_id": "tbl91gZyDPCLhlva",
+      "record_id": "recTestQuote001"
+    },
+    "raw": {
+      "event": {
+        "action_list": [
+          {
+            "after_value": [
+              {
+                "field_id": "fldsuKm8jW",
+                "field_value": "[{\"type\":\"text\",\"text\":\"客户想做一日团建，约30人\"}]"
+              },
+              {
+                "field_id": "fld1QdGtzJ",
+                "field_value": "{\"bus_type\":[1],\"data\":[{\"type\":\"text\",\"text\":\"张三\"}]}"
+              },
+              {
+                "field_id": "fld3d5yFvP",
+                "field_value": "{\"bus_type\":[1],\"data\":[{\"type\":\"text\",\"text\":\"13800000000\"}]}"
+              },
+              {
+                "field_id": "fldG4YOiIT",
+                "field_value": "{\"bus_type\":[1],\"data\":[{\"type\":\"text\",\"text\":\"测试公司\"}]}"
+              },
+              {
+                "field_id": "fld6UQO969",
+                "field_identity_value": {
+                  "users": [
+                    {
+                      "name": "阿铭"
+                    }
+                  ]
+                },
+                "field_value": "{\"users\":[{\"name\":\"阿铭\"}]}"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

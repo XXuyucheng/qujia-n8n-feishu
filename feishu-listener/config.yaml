@@ -1,0 +1,31 @@
+retention:
+  max_days: 7
+  max_events: 5000
+  vacuum_after_cleanup: true
+
+storage:
+  ignored_raw_mode: summary
+  matched_raw_mode: full
+
+routes:
+  - name: invoice-bitable-record-changed
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tblNd9zgN7ALihwj
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice
+    max_attempts: 3
+    timeout_seconds: 10
+  - name: quote-generation-test-bitable-record-changed
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl91gZyDPCLhlva
+    field_conditions:
+      - field_id: fldGQVeaKb
+        equals: optDK1JeDR
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-test
+    max_attempts: 3
+    timeout_seconds: 10

@@ -1,0 +1,29 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# n8n runtime data and credentials database
+n8n-data/
+
+# Runtime files and logs
+files/tmp/
+feishu-listener/data/
+backup-broken/
+*.sqlite
+*.sqlite-*
+*.db
+*.journal
+*.log
+
+# Python/cache/build artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

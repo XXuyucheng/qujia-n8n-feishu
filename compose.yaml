@@ -1,0 +1,46 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:2.11.3
+    container_name: n8n
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n-data:/home/node/.n8n
+      - ./files:/files
+    environment:
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - N8N_SECURE_COOKIE=false
+      - TZ=Asia/Shanghai
+      - GENERIC_TIMEZONE=Asia/Shanghai
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    restart: unless-stopped
+
+  pdf-parser:
+    build: ./pdf-parser
+    container_name: pdf-parser
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  feishu-listener:
+    build: ./feishu-listener
+    container_name: feishu-listener
+    ports:
+      - "8010:8010"
+    volumes:
+      - ./feishu-listener/config.yaml:/app/config.yaml:ro
+      - ./feishu-listener/data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - FEISHU_APP_ID=${FEISHU_APP_ID}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      - FEISHU_VERIFICATION_TOKEN=${FEISHU_VERIFICATION_TOKEN}
+      - FEISHU_ENCRYPT_KEY=${FEISHU_ENCRYPT_KEY}
+      - LISTENER_CONFIG_PATH=/app/config.yaml
+      - LISTENER_DB_PATH=/data/events.sqlite
+      - LISTENER_PORT=8010
+      - LOG_LEVEL=INFO
+      - ENABLE_DEBUG_ENDPOINTS=true
+    restart: unless-stopped
