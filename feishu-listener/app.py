@@ -25,6 +25,8 @@ DB_PATH = Path(os.getenv("LISTENER_DB_PATH", "/data/events.sqlite"))
 HOST = os.getenv("LISTENER_HOST", "0.0.0.0")
 PORT = int(os.getenv("LISTENER_PORT", "8010"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+MAX_EVENT_LIMIT = int(os.getenv("LISTENER_MAX_EVENT_LIMIT", "1000"))
+MAX_FIELD_SCAN_ROWS = int(os.getenv("LISTENER_MAX_FIELD_SCAN_ROWS", "50000"))
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
@@ -101,16 +103,26 @@ class EventStore:
             "record_id": "alter table events add column record_id text",
             "chat_id": "alter table events add column chat_id text",
             "command": "alter table events add column command text",
+            "is_deleted": "alter table events add column is_deleted integer not null default 0",
+            "deleted_record_ids": "alter table events add column deleted_record_ids text",
+            "deleted_by_open_id": "alter table events add column deleted_by_open_id text",
+            "deleted_by_union_id": "alter table events add column deleted_by_union_id text",
+            "deleted_by_user_id": "alter table events add column deleted_by_user_id text",
+            "deleted_field_count": "alter table events add column deleted_field_count integer not null default 0",
         }
         for column, sql in migrations.items():
             if column not in columns:
                 conn.execute(sql)
+                columns.add(column)
 
         conn.execute("create index if not exists idx_events_status on events(status)")
         conn.execute("create index if not exists idx_events_route_name on events(route_name)")
         conn.execute("create index if not exists idx_events_event_type on events(event_type)")
         conn.execute("create index if not exists idx_events_table_id on events(table_id)")
         conn.execute("create index if not exists idx_events_record_id on events(record_id)")
+        conn.execute("create index if not exists idx_events_is_deleted on events(is_deleted)")
+        conn.execute("create index if not exists idx_events_deleted_by_open_id on events(deleted_by_open_id)")
+        conn.execute("create index if not exists idx_events_deleted_by_user_id on events(deleted_by_user_id)")
 
         conn.execute(
             """
@@ -127,6 +139,45 @@ class EventStore:
                or command is null
             """
         )
+        self.backfill_deletion_metadata(conn)
+
+    def backfill_deletion_metadata(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """
+            select id, normalized_json, raw_json
+            from events
+            where normalized_json like '%record_deleted%'
+               or raw_json like '%record_deleted%'
+            """
+        ).fetchall()
+        for row in rows:
+            normalized = parse_json(row["normalized_json"])
+            raw = parse_json(row["raw_json"])
+            payload, _ = preferred_raw_payload(normalized, raw)
+            deletion = extract_deletion_info(payload)
+            if not deletion.get("is_deleted"):
+                continue
+            deleted_by = deletion.get("deleted_by") or {}
+            conn.execute(
+                """
+                update events
+                set is_deleted = 1,
+                    deleted_record_ids = ?,
+                    deleted_by_open_id = ?,
+                    deleted_by_union_id = ?,
+                    deleted_by_user_id = ?,
+                    deleted_field_count = ?
+                where id = ?
+                """,
+                (
+                    ",".join(deletion.get("record_ids") or []),
+                    deleted_by.get("open_id"),
+                    deleted_by.get("union_id"),
+                    deleted_by.get("user_id"),
+                    int(deletion.get("field_count") or 0),
+                    row["id"],
+                ),
+            )
 
     def insert_event(
         self,
@@ -140,14 +191,18 @@ class EventStore:
     ) -> int:
         now = datetime.now(timezone.utc).isoformat()
         resource = normalized.get("resource") or {}
+        deletion = extract_deletion_info(normalized.get("raw") or raw)
+        deleted_by = deletion.get("deleted_by") or {}
         with self._lock, self.connect() as conn:
             cur = conn.execute(
                 """
                 insert into events (
                     event_id, event_type, route_name, status, dispatch_enabled,
                     normalized_json, raw_json, raw_mode, error, created_at,
-                    app_token, table_id, record_id, chat_id, command
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    app_token, table_id, record_id, chat_id, command,
+                    is_deleted, deleted_record_ids, deleted_by_open_id,
+                    deleted_by_union_id, deleted_by_user_id, deleted_field_count
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     normalized.get("event_id"),
@@ -165,6 +220,12 @@ class EventStore:
                     resource.get("record_id"),
                     resource.get("chat_id"),
                     normalized.get("command"),
+                    1 if deletion.get("is_deleted") else 0,
+                    ",".join(deletion.get("record_ids") or []),
+                    deleted_by.get("open_id"),
+                    deleted_by.get("union_id"),
+                    deleted_by.get("user_id"),
+                    int(deletion.get("field_count") or 0),
                 ),
             )
             return int(cur.lastrowid)
@@ -209,50 +270,187 @@ class EventStore:
         status: Optional[str] = None,
         route_name: Optional[str] = None,
         event_type: Optional[str] = None,
+        app_token: Optional[str] = None,
         table_id: Optional[str] = None,
         record_id: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        command: Optional[str] = None,
+        deleted_only: bool = False,
+        deleted_record_id: Optional[str] = None,
+        deleted_by: Optional[str] = None,
+        created_from: Optional[str] = None,
+        created_to: Optional[str] = None,
+        q: Optional[str] = None,
+        field_id: Optional[str] = None,
+        field_path: Optional[str] = None,
+        field_key: Optional[str] = None,
+        field_value: Optional[str] = None,
+        match_source: str = "all",
+        scan_limit: int = 10000,
+        sort: str = "desc",
     ) -> Dict[str, Any]:
         clauses = []
         params: List[Any] = []
 
         filters = {
-            "status": status,
-            "route_name": route_name,
-            "event_type": event_type,
-            "table_id": table_id,
-            "record_id": record_id,
+            "e.status": status,
+            "e.route_name": route_name,
+            "e.event_type": event_type,
+            "e.app_token": app_token,
+            "e.table_id": table_id,
+            "e.record_id": record_id,
+            "e.chat_id": chat_id,
+            "e.command": command,
         }
         for column, value in filters.items():
             if value:
                 clauses.append(f"{column} = ?")
                 params.append(value)
 
+        if deleted_only:
+            clauses.append("e.is_deleted = 1")
+        if deleted_record_id:
+            clauses.append("e.deleted_record_ids like ?")
+            params.append(f"%{deleted_record_id.strip()}%")
+        if deleted_by:
+            deleted_by_like = f"%{deleted_by.strip()}%"
+            clauses.append(
+                "(e.deleted_by_open_id like ? or e.deleted_by_union_id like ? or e.deleted_by_user_id like ?)"
+            )
+            params.extend([deleted_by_like, deleted_by_like, deleted_by_like])
+
+        if created_from:
+            clauses.append("e.created_at >= ?")
+            params.append(normalize_datetime_filter(created_from))
+        if created_to:
+            clauses.append("e.created_at <= ?")
+            params.append(normalize_datetime_filter(created_to))
+
+        if q:
+            q_like = f"%{q.strip()}%"
+            search_columns = [
+                "e.event_id",
+                "e.event_type",
+                "e.route_name",
+                "e.status",
+                "e.error",
+                "e.app_token",
+                "e.table_id",
+                "e.record_id",
+                "e.chat_id",
+                "e.command",
+                "e.deleted_record_ids",
+                "e.deleted_by_open_id",
+                "e.deleted_by_union_id",
+                "e.deleted_by_user_id",
+                "e.created_at",
+                "e.normalized_json",
+                "e.raw_json",
+            ]
+            clauses.append("(" + " or ".join(f"{column} like ?" for column in search_columns) + ")")
+            params.extend([q_like] * len(search_columns))
+
+        field_search_active = any(
+            bool((value or "").strip())
+            for value in (field_id, field_path, field_key, field_value)
+        )
+        if field_search_active:
+            prefilter_clauses = []
+            prefilter_params: List[Any] = []
+            for term in (field_id, field_key, field_value):
+                text = (term or "").strip()
+                if not text:
+                    continue
+                prefilter_clauses.append("(e.normalized_json like ? or e.raw_json like ?)")
+                prefilter_params.extend([f"%{text}%", f"%{text}%"])
+            if prefilter_clauses:
+                clauses.append("(" + " and ".join(prefilter_clauses) + ")")
+                params.extend(prefilter_params)
+
         where = f"where {' and '.join(clauses)}" if clauses else ""
+        order_direction = "asc" if str(sort).lower() == "asc" else "desc"
+        row_columns = """
+            e.id, e.event_id, e.event_type, e.route_name, e.status,
+            e.dispatch_enabled, e.raw_mode, e.error, e.created_at,
+            e.app_token, e.table_id, e.record_id, e.chat_id, e.command,
+            e.is_deleted, e.deleted_record_ids, e.deleted_by_open_id,
+            e.deleted_by_union_id, e.deleted_by_user_id, e.deleted_field_count,
+            (
+              select a.status
+              from dispatch_attempts a
+              where a.event_row_id = e.id
+              order by a.id desc
+              limit 1
+            ) as dispatch_status,
+            (
+              select a.status_code
+              from dispatch_attempts a
+              where a.event_row_id = e.id
+              order by a.id desc
+              limit 1
+            ) as dispatch_status_code
+        """
 
         with self.connect() as conn:
-            total = conn.execute(f"select count(*) from events {where}", params).fetchone()[0]
+            total = conn.execute(f"select count(*) from events e {where}", params).fetchone()[0]
+            if field_search_active:
+                scan_rows = min(max(scan_limit, limit + offset), MAX_FIELD_SCAN_ROWS)
+                rows = conn.execute(
+                    f"""
+                    select {row_columns}, e.normalized_json, e.raw_json
+                    from events e
+                    {where}
+                    order by e.id {order_direction}
+                    limit ?
+                    """,
+                    [*params, scan_rows],
+                ).fetchall()
+                matched_total = 0
+                events: List[Dict[str, Any]] = []
+                for row in rows:
+                    row_data = dict(row)
+                    normalized = parse_json(row_data.pop("normalized_json", "{}"))
+                    raw = parse_json(row_data.pop("raw_json", "{}"))
+                    matches = find_event_matches(
+                        normalized=normalized,
+                        raw=raw,
+                        field_id=field_id,
+                        field_path=field_path,
+                        field_key=field_key,
+                        field_value=field_value,
+                        source=match_source,
+                        limit=50,
+                    )
+                    if not matches:
+                        continue
+                    if matched_total >= offset and len(events) < limit:
+                        row_data["match_count"] = len(matches)
+                        row_data["field_matches"] = matches[:8]
+                        events.append(row_data)
+                    matched_total += 1
+
+                return {
+                    "total": matched_total,
+                    "candidate_total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "sort": order_direction,
+                    "events": events,
+                    "field_search": {
+                        "active": True,
+                        "source": match_source,
+                        "scanned": len(rows),
+                        "scan_limit": scan_rows,
+                        "truncated": total > len(rows),
+                    },
+                }
+
             rows = conn.execute(
                 f"""
-                select e.id, e.event_id, e.event_type, e.route_name, e.status,
-                       e.dispatch_enabled, e.raw_mode, e.error, e.created_at,
-                       e.app_token, e.table_id, e.record_id, e.chat_id, e.command,
-                       (
-                         select a.status
-                         from dispatch_attempts a
-                         where a.event_row_id = e.id
-                         order by a.id desc
-                         limit 1
-                       ) as dispatch_status,
-                       (
-                         select a.status_code
-                         from dispatch_attempts a
-                         where a.event_row_id = e.id
-                         order by a.id desc
-                         limit 1
-                       ) as dispatch_status_code
+                select {row_columns}
                 from events e
                 {where}
-                order by e.id desc
+                order by e.id {order_direction}
                 limit ? offset ?
                 """,
                 [*params, limit, offset],
@@ -262,10 +460,27 @@ class EventStore:
             "total": total,
             "limit": limit,
             "offset": offset,
+            "sort": order_direction,
             "events": [dict(row) for row in rows],
+            "field_search": {
+                "active": False,
+                "source": match_source,
+                "scanned": 0,
+                "scan_limit": scan_limit,
+                "truncated": False,
+            },
         }
 
-    def get_event(self, event_id: int) -> Dict[str, Any]:
+    def get_event(
+        self,
+        event_id: int,
+        field_id: Optional[str] = None,
+        field_path: Optional[str] = None,
+        field_key: Optional[str] = None,
+        field_value: Optional[str] = None,
+        q: Optional[str] = None,
+        match_source: str = "all",
+    ) -> Dict[str, Any]:
         with self.connect() as conn:
             event = conn.execute("select * from events where id = ?", (event_id,)).fetchone()
             if event is None:
@@ -279,12 +494,27 @@ class EventStore:
         data["normalized"] = parse_json(data.pop("normalized_json", "{}"))
         data["raw"] = parse_json(data.pop("raw_json", "{}"))
         data["dispatch_attempts"] = [dict(row) for row in attempts]
+        detail_raw, detail_root = preferred_raw_payload(data["normalized"], data["raw"])
+        data["deletion"] = extract_deletion_info(detail_raw, root_path=detail_root)
+        data["field_changes"] = extract_bitable_field_changes(detail_raw, root_path=detail_root)
+        data["field_matches"] = find_event_matches(
+            normalized=data["normalized"],
+            raw=data["raw"],
+            field_id=field_id,
+            field_path=field_path,
+            field_key=field_key,
+            field_value=field_value,
+            q=q,
+            source=match_source,
+            limit=300,
+        )
         return data
 
     def stats(self) -> Dict[str, Any]:
         with self.connect() as conn:
             event_count = conn.execute("select count(*) from events").fetchone()[0]
             attempt_count = conn.execute("select count(*) from dispatch_attempts").fetchone()[0]
+            deleted_count = conn.execute("select count(*) from events where is_deleted = 1").fetchone()[0]
             by_status = [
                 dict(row)
                 for row in conn.execute(
@@ -315,12 +545,18 @@ class EventStore:
                     """
                 ).fetchall()
             ]
+            bounds = conn.execute(
+                "select min(created_at) as first_event_at, max(created_at) as last_event_at from events"
+            ).fetchone()
 
         return {
             "db_path": str(self.path),
             "db_size_bytes": self.path.stat().st_size if self.path.exists() else 0,
             "event_count": event_count,
             "dispatch_attempt_count": attempt_count,
+            "deleted_event_count": deleted_count,
+            "first_event_at": bounds["first_event_at"] if bounds else None,
+            "last_event_at": bounds["last_event_at"] if bounds else None,
             "by_status": by_status,
             "by_route": by_route,
             "recent_dispatch_attempts": recent_attempts,
@@ -450,6 +686,117 @@ def parse_json(value: str) -> Any:
 
 def chunked(items: List[int], size: int) -> List[List[int]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def normalize_datetime_filter(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return text
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    if dt.tzinfo is None:
+        return dt.isoformat()
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def contains_ci(haystack: Any, needle: Optional[str]) -> bool:
+    text = str(needle or "").strip()
+    if not text:
+        return True
+    return text.casefold() in str(haystack or "").casefold()
+
+
+def trim_text(value: str, limit: int = 260) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 3)] + "..."
+
+
+def json_preview(value: Any, limit: int = 260) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return trim_text(value.strip(), limit)
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    try:
+        return trim_text(json.dumps(value, ensure_ascii=False, separators=(",", ":")), limit)
+    except Exception:
+        return trim_text(str(value), limit)
+
+
+def path_leaf(path: str) -> str:
+    if not path:
+        return ""
+    segment = path.rsplit(".", 1)[-1]
+    if "[" in segment and not segment.startswith("["):
+        return segment.split("[", 1)[0]
+    return segment
+
+
+def iter_json_paths(value: Any, path: str) -> List[Tuple[str, str, Any]]:
+    items: List[Tuple[str, str, Any]] = [(path, path_leaf(path), value)]
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            items.extend(iter_json_paths(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            child_path = f"{path}[{index}]" if path else f"[{index}]"
+            items.extend(iter_json_paths(child, child_path))
+    return items
+
+
+def find_json_matches(
+    normalized: Dict[str, Any],
+    raw: Dict[str, Any],
+    field_path: Optional[str] = None,
+    field_key: Optional[str] = None,
+    field_value: Optional[str] = None,
+    q: Optional[str] = None,
+    source: str = "all",
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    if not any(bool((value or "").strip()) for value in (field_path, field_key, field_value, q)):
+        return []
+
+    source = source if source in {"all", "normalized", "raw"} else "all"
+    roots: List[Tuple[str, Dict[str, Any]]] = []
+    if source in {"all", "normalized"}:
+        roots.append(("normalized", normalized))
+    if source in {"all", "raw"}:
+        roots.append(("raw", raw))
+
+    matches: List[Dict[str, Any]] = []
+    for root_name, root_value in roots:
+        for path, key, value in iter_json_paths(root_value, root_name):
+            preview = json_preview(value)
+            is_container = isinstance(value, (dict, list))
+            path_ok = contains_ci(path, field_path)
+            key_ok = contains_ci(key, field_key) or contains_ci(path, field_key)
+            value_ok = contains_ci(preview, field_value)
+            q_ok = contains_ci(path, q) or contains_ci(key, q) or contains_ci(preview, q)
+            if not (path_ok and key_ok and value_ok and q_ok):
+                continue
+            if is_container and not (field_path or field_key):
+                continue
+            matches.append(
+                {
+                    "kind": "json_path",
+                    "source": root_name,
+                    "path": path,
+                    "key": key,
+                    "value": preview,
+                    "value_type": type(value).__name__,
+                }
+            )
+            if len(matches) >= limit:
+                return matches
+    return matches
 
 
 def as_dict(value: Any) -> Dict[str, Any]:
@@ -629,16 +976,27 @@ def format_bytes(value: int) -> str:
 def format_event_row(row: Dict[str, Any]) -> str:
     status = escape(str(row.get("status") or ""))
     dispatch_status = escape(str(row.get("dispatch_status") or ""))
+    match_count = row.get("match_count") or ""
+    deleted_pill = "<span class='pill deleted'>deleted</span>" if row.get("is_deleted") else ""
+    deleted_by = (
+        row.get("deleted_by_user_id")
+        or row.get("deleted_by_open_id")
+        or row.get("deleted_by_union_id")
+        or ""
+    )
     return (
-        "<tr>"
+        f"<tr class='{'deleted-row' if row.get('is_deleted') else ''}'>"
         f"<td><a href='#' onclick='showDetail({int(row.get('id'))}); return false;'>{int(row.get('id'))}</a></td>"
         f"<td><code>{escape(str(row.get('created_at') or ''))}</code></td>"
         f"<td><span class='pill {escape(str(row.get('status') or ''))}'>{status}</span></td>"
+        f"<td>{deleted_pill}</td>"
+        f"<td><code>{escape(str(deleted_by))}</code></td>"
         f"<td><span class='pill {escape(str(row.get('dispatch_status') or ''))}'>{dispatch_status}</span></td>"
         f"<td>{escape(str(row.get('route_name') or ''))}</td>"
         f"<td><code>{escape(str(row.get('table_id') or ''))}</code></td>"
         f"<td><code>{escape(str(row.get('record_id') or ''))}</code></td>"
         f"<td>{escape(str(row.get('event_type') or ''))}</td>"
+        f"<td>{escape(str(match_count))}</td>"
         "</tr>"
     )
 
@@ -682,6 +1040,327 @@ def extract_field_tokens(value: Any) -> List[str]:
 
     walk(value)
     return tokens
+
+
+def field_value_text(value: Any) -> str:
+    tokens = extract_field_tokens(value)
+    if tokens:
+        return trim_text(", ".join(tokens[:12]), 320)
+    return json_preview(value, 320)
+
+
+def preferred_raw_payload(normalized: Dict[str, Any], raw: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
+    normalized_raw = (normalized or {}).get("raw")
+    if isinstance(normalized_raw, dict) and isinstance(normalized_raw.get("event"), dict):
+        return normalized_raw, "normalized.raw"
+    return raw or {}, "raw"
+
+
+def operator_identity(raw: Dict[str, Any]) -> Dict[str, Any]:
+    event = (raw or {}).get("event") or {}
+    operator = event.get("operator_id") or event.get("operator") or {}
+    if not isinstance(operator, dict):
+        return {"value": str(operator)}
+    user_id = operator.get("user_id")
+    if isinstance(user_id, dict):
+        user_id = user_id.get("user_id") or user_id.get("open_id") or user_id.get("union_id")
+    identity = {
+        "open_id": operator.get("open_id"),
+        "union_id": operator.get("union_id"),
+        "user_id": user_id,
+        "name": operator.get("name") or operator.get("en_name") or operator.get("enName"),
+    }
+    display = identity.get("name") or identity.get("user_id") or identity.get("open_id") or identity.get("union_id") or ""
+    identity["display"] = display
+    return identity
+
+
+def is_delete_action(action: Dict[str, Any]) -> bool:
+    action_name = str(action.get("action") or action.get("type") or "").casefold()
+    return action_name in {"record_deleted", "record_delete", "delete_record"} or (
+        "delete" in action_name and "record" in action_name
+    )
+
+
+def extract_record_fields(
+    action: Dict[str, Any],
+    action_index: int,
+    value_key: str,
+    summary_key: str,
+    root_path: str,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    fields: List[Dict[str, Any]] = []
+    values = action.get(value_key)
+    if isinstance(values, list) and values:
+        for field_index, field in enumerate(values):
+            if not isinstance(field, dict):
+                continue
+            raw_value = field.get("field_value")
+            identity_value = field.get("field_identity_value")
+            fields.append(
+                {
+                    "field_index": field_index,
+                    "field_id": str(field.get("field_id") or ""),
+                    "path": f"{root_path}.event.action_list[{action_index}].{value_key}[{field_index}]",
+                    "value_text": field_value_text(raw_value),
+                    "identity_text": field_value_text(identity_value),
+                    "raw_value": raw_value,
+                    "identity_value": identity_value,
+                    "summary": False,
+                }
+            )
+        return fields, False
+
+    field_ids = action.get(summary_key) or []
+    if isinstance(field_ids, list) and field_ids:
+        for field_index, field_id in enumerate(field_ids):
+            fields.append(
+                {
+                    "field_index": field_index,
+                    "field_id": str(field_id or ""),
+                    "path": f"{root_path}.event.action_list[{action_index}].{summary_key}[{field_index}]",
+                    "value_text": "summary only",
+                    "identity_text": "",
+                    "raw_value": None,
+                    "identity_value": None,
+                    "summary": True,
+                }
+            )
+    return fields, True
+
+
+def extract_deletion_info(raw: Dict[str, Any], root_path: str = "raw") -> Dict[str, Any]:
+    raw_event = (raw or {}).get("event") or {}
+    actions = raw_event.get("action_list") or []
+    deleted_records: List[Dict[str, Any]] = []
+
+    if isinstance(actions, list):
+        for action_index, action in enumerate(actions):
+            if not isinstance(action, dict) or not is_delete_action(action):
+                continue
+            before_fields, before_summary = extract_record_fields(
+                action,
+                action_index,
+                "before_value",
+                "before_field_ids",
+                root_path,
+            )
+            after_fields, after_summary = extract_record_fields(
+                action,
+                action_index,
+                "after_value",
+                "after_field_ids",
+                root_path,
+            )
+            deleted_records.append(
+                {
+                    "action_index": action_index,
+                    "action": action.get("action") or "",
+                    "record_id": str(action.get("record_id") or ""),
+                    "before_field_count": len(before_fields),
+                    "after_field_count": len(after_fields),
+                    "before_summary": before_summary,
+                    "after_summary": after_summary,
+                    "before_fields": before_fields,
+                    "after_fields": after_fields,
+                    "path": f"{root_path}.event.action_list[{action_index}]",
+                }
+            )
+
+    record_ids = [record["record_id"] for record in deleted_records if record.get("record_id")]
+    return {
+        "is_deleted": bool(deleted_records),
+        "record_ids": record_ids,
+        "record_count": len(deleted_records),
+        "field_count": sum(int(record.get("before_field_count") or 0) for record in deleted_records),
+        "deleted_by": operator_identity(raw),
+        "table_id": raw_event.get("table_id"),
+        "file_token": raw_event.get("file_token") or raw_event.get("app_token"),
+        "revision": raw_event.get("revision"),
+        "update_time": raw_event.get("update_time"),
+        "records": deleted_records,
+        "source_path": root_path,
+    }
+
+
+def extract_bitable_field_changes(
+    raw: Dict[str, Any],
+    max_changes: int = 1000,
+    root_path: str = "raw",
+) -> List[Dict[str, Any]]:
+    raw_event = (raw or {}).get("event") or {}
+    actions = raw_event.get("action_list") or []
+    changes: List[Dict[str, Any]] = []
+
+    if not isinstance(actions, list):
+        return changes
+
+    for action_index, action in enumerate(actions):
+        if not isinstance(action, dict):
+            continue
+        for value_key, side, summary_key in (
+            ("before_value", "before", "before_field_ids"),
+            ("after_value", "after", "after_field_ids"),
+        ):
+            values = action.get(value_key)
+            if isinstance(values, list) and values:
+                for field_index, field in enumerate(values):
+                    if not isinstance(field, dict):
+                        continue
+                    raw_value = field.get("field_value")
+                    identity_value = field.get("field_identity_value")
+                    changes.append(
+                        {
+                            "kind": "bitable_field",
+                            "action_index": action_index,
+                            "field_index": field_index,
+                            "action": action.get("action") or "",
+                            "record_id": action.get("record_id") or "",
+                            "side": side,
+                            "field_id": str(field.get("field_id") or ""),
+                            "path": f"{root_path}.event.action_list[{action_index}].{value_key}[{field_index}]",
+                            "value_text": field_value_text(raw_value),
+                            "identity_text": field_value_text(identity_value),
+                            "raw_value": raw_value,
+                            "identity_value": identity_value,
+                            "summary": False,
+                        }
+                    )
+                    if len(changes) >= max_changes:
+                        return changes
+                continue
+
+            field_ids = action.get(summary_key) or []
+            if not isinstance(field_ids, list):
+                continue
+            for field_index, field_id in enumerate(field_ids):
+                changes.append(
+                    {
+                        "kind": "bitable_field",
+                        "action_index": action_index,
+                        "field_index": field_index,
+                        "action": action.get("action") or "",
+                        "record_id": action.get("record_id") or "",
+                        "side": side,
+                        "field_id": str(field_id or ""),
+                        "path": f"{root_path}.event.action_list[{action_index}].{summary_key}[{field_index}]",
+                        "value_text": "summary only",
+                        "identity_text": "",
+                        "raw_value": None,
+                        "identity_value": None,
+                        "summary": True,
+                    }
+                )
+                if len(changes) >= max_changes:
+                    return changes
+
+    return changes
+
+
+def bitable_change_matches(
+    change: Dict[str, Any],
+    field_id: Optional[str] = None,
+    field_path: Optional[str] = None,
+    field_key: Optional[str] = None,
+    field_value: Optional[str] = None,
+    q: Optional[str] = None,
+) -> bool:
+    value_blob = " ".join(
+        [
+            str(change.get("value_text") or ""),
+            str(change.get("identity_text") or ""),
+            json_preview(change.get("raw_value"), 500),
+            json_preview(change.get("identity_value"), 500),
+        ]
+    )
+    field_blob = " ".join(
+        [
+            str(change.get("field_id") or ""),
+            str(change.get("path") or ""),
+            str(change.get("action") or ""),
+            str(change.get("record_id") or ""),
+            str(change.get("side") or ""),
+            value_blob,
+        ]
+    )
+
+    if field_id and not contains_ci(change.get("field_id"), field_id):
+        return False
+    if field_path and not contains_ci(change.get("path"), field_path):
+        return False
+    if field_key and not (
+        contains_ci(change.get("field_id"), field_key)
+        or contains_ci("field_id", field_key)
+        or contains_ci("field_value", field_key)
+        or contains_ci(change.get("path"), field_key)
+    ):
+        return False
+    if field_value and not contains_ci(value_blob, field_value):
+        return False
+    if q and not contains_ci(field_blob, q):
+        return False
+    return True
+
+
+def find_event_matches(
+    normalized: Dict[str, Any],
+    raw: Dict[str, Any],
+    field_id: Optional[str] = None,
+    field_path: Optional[str] = None,
+    field_key: Optional[str] = None,
+    field_value: Optional[str] = None,
+    q: Optional[str] = None,
+    source: str = "all",
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    if not any(bool((value or "").strip()) for value in (field_id, field_path, field_key, field_value, q)):
+        return []
+
+    matches: List[Dict[str, Any]] = []
+    if source in {"all", "raw"}:
+        for change in extract_bitable_field_changes(raw):
+            if not bitable_change_matches(
+                change,
+                field_id=field_id,
+                field_path=field_path,
+                field_key=field_key,
+                field_value=field_value,
+                q=q,
+            ):
+                continue
+            matches.append(
+                {
+                    "kind": "bitable_field",
+                    "source": "raw",
+                    "path": change["path"],
+                    "key": change["field_id"],
+                    "value": change["value_text"],
+                    "identity": change["identity_text"],
+                    "action": change["action"],
+                    "record_id": change["record_id"],
+                    "side": change["side"],
+                    "summary": change["summary"],
+                }
+            )
+            if len(matches) >= limit:
+                return matches
+
+    remaining = limit - len(matches)
+    if remaining <= 0:
+        return matches
+    matches.extend(
+        find_json_matches(
+            normalized=normalized,
+            raw=raw,
+            field_path=field_path,
+            field_key=field_key,
+            field_value=field_value or field_id,
+            q=q,
+            source=source,
+            limit=remaining,
+        )
+    )
+    return matches
 
 
 def action_field_tokens(event: Dict[str, Any], field_id: str) -> List[str]:
@@ -994,13 +1673,29 @@ def routes() -> Dict[str, Any]:
 
 @app.get("/events")
 def events(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(100, ge=1, le=MAX_EVENT_LIMIT),
     offset: int = Query(0, ge=0),
     status: Optional[str] = None,
     route_name: Optional[str] = None,
     event_type: Optional[str] = None,
+    app_token: Optional[str] = None,
     table_id: Optional[str] = None,
     record_id: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    command: Optional[str] = None,
+    deleted_only: bool = False,
+    deleted_record_id: Optional[str] = None,
+    deleted_by: Optional[str] = None,
+    created_from: Optional[str] = None,
+    created_to: Optional[str] = None,
+    q: Optional[str] = None,
+    field_id: Optional[str] = None,
+    field_path: Optional[str] = None,
+    field_key: Optional[str] = None,
+    field_value: Optional[str] = None,
+    match_source: str = "all",
+    scan_limit: int = Query(10000, ge=100, le=MAX_FIELD_SCAN_ROWS),
+    sort: str = "desc",
 ) -> Dict[str, Any]:
     return store.list_events(
         limit=limit,
@@ -1008,15 +1703,47 @@ def events(
         status=status,
         route_name=route_name,
         event_type=event_type,
+        app_token=app_token,
         table_id=table_id,
         record_id=record_id,
+        chat_id=chat_id,
+        command=command,
+        deleted_only=deleted_only,
+        deleted_record_id=deleted_record_id,
+        deleted_by=deleted_by,
+        created_from=created_from,
+        created_to=created_to,
+        q=q,
+        field_id=field_id,
+        field_path=field_path,
+        field_key=field_key,
+        field_value=field_value,
+        match_source=match_source,
+        scan_limit=scan_limit,
+        sort=sort,
     )
 
 
 @app.get("/events/{event_row_id}")
-def event_detail(event_row_id: int) -> Dict[str, Any]:
+def event_detail(
+    event_row_id: int,
+    q: Optional[str] = None,
+    field_id: Optional[str] = None,
+    field_path: Optional[str] = None,
+    field_key: Optional[str] = None,
+    field_value: Optional[str] = None,
+    match_source: str = "all",
+) -> Dict[str, Any]:
     try:
-        return store.get_event(event_row_id)
+        return store.get_event(
+            event_row_id,
+            q=q,
+            field_id=field_id,
+            field_path=field_path,
+            field_key=field_key,
+            field_value=field_value,
+            match_source=match_source,
+        )
     except KeyError:
         raise HTTPException(status_code=404, detail="event not found")
 
@@ -1061,6 +1788,13 @@ def ui() -> str:
     stats_data = stats()
     route_data = routes()["routes"]
     event_data = store.list_events(limit=100, offset=0)
+    initial_json = json.dumps(
+        {
+            "events": event_data,
+            "stats": stats_data,
+        },
+        ensure_ascii=False,
+    ).replace("</", "<\\/")
 
     status_cards = "".join(
         f"<div class='metric'><span>{escape(str(row['status']))}</span><strong>{row['count']}</strong></div>"
@@ -1078,8 +1812,18 @@ def ui() -> str:
         for route in route_data
     )
     event_rows = "".join(format_event_row(row) for row in event_data["events"])
+    limit_options = "".join(
+        f"<option value='{value}' {'selected' if value == 100 else ''}>{value}</option>"
+        for value in (25, 50, 100, 250, 500, 1000)
+        if value <= MAX_EVENT_LIMIT
+    )
+    scan_options = "".join(
+        f"<option value='{value}' {'selected' if value == 10000 else ''}>{value}</option>"
+        for value in (1000, 5000, 10000, 25000, 50000)
+        if value <= MAX_FIELD_SCAN_ROWS
+    )
 
-    return f"""
+    html = r"""
 <!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1087,44 +1831,53 @@ def ui() -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Feishu Listener</title>
   <style>
-    :root {{
+    :root {
       color-scheme: light;
-      --bg: #f7f8fb;
+      --bg: #eef1f4;
       --panel: #ffffff;
+      --panel-soft: #f7f9fb;
       --text: #20242c;
       --muted: #626b7a;
       --line: #dfe4ec;
       --accent: #176b87;
+      --accent-soft: #e8f4f7;
+      --violet: #6457a6;
       --ok: #1b7f4b;
       --warn: #9a5b00;
       --bad: #b42318;
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
+      --mark: #fff1a8;
+    }
+    * { box-sizing: border-box; }
+    body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 14px;
-    }}
-    header {{
-      padding: 20px 28px 14px;
+    }
+    header {
+      padding: 18px 28px 14px;
       background: var(--panel);
       border-bottom: 1px solid var(--line);
-    }}
-    h1 {{ margin: 0 0 6px; font-size: 22px; letter-spacing: 0; }}
-    h2 {{ margin: 0 0 12px; font-size: 16px; }}
-    main {{ padding: 20px 28px 32px; display: grid; gap: 18px; }}
-    section {{
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: 0; }
+    h2 { margin: 0 0 12px; font-size: 16px; }
+    h3 { margin: 0 0 10px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0; }
+    main { padding: 0 0 36px; }
+    section {
       background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 16px;
+      border-bottom: 1px solid var(--line);
+      padding: 18px 28px;
       overflow: hidden;
-    }}
-    .subtle {{ color: var(--muted); }}
-    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }}
-    .metric {{
+    }
+    .subtle { color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+    .metric {
       border: 1px solid var(--line);
       border-radius: 6px;
       padding: 10px 12px;
@@ -1132,19 +1885,44 @@ def ui() -> str:
       align-items: center;
       justify-content: space-between;
       min-height: 44px;
-    }}
-    .metric strong {{ font-size: 18px; }}
-    table {{ width: 100%; border-collapse: collapse; }}
-    th, td {{ text-align: left; border-bottom: 1px solid var(--line); padding: 8px 9px; vertical-align: top; }}
-    th {{ color: var(--muted); font-size: 12px; font-weight: 600; background: #fbfcfe; }}
-    code {{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }}
-    .scroll {{ overflow-x: auto; }}
-    .pill {{ display: inline-block; padding: 2px 7px; border-radius: 999px; background: #eef2f6; }}
-    .pill.dispatching, .pill.success {{ color: var(--ok); background: #eaf7ef; }}
-    .pill.ignored {{ color: var(--muted); }}
-    .pill.failed, .pill.error {{ color: var(--bad); background: #fff0ee; }}
-    .filters {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }}
-    input, button {{
+      background: var(--panel);
+    }
+    .metric strong { font-size: 18px; }
+    .metric span { color: var(--muted); }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; border-bottom: 1px solid var(--line); padding: 8px 9px; vertical-align: top; }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; background: #fbfcfe; position: sticky; top: 0; z-index: 1; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .scroll { overflow: auto; }
+    .event-scroll { max-height: 520px; border: 1px solid var(--line); }
+    .event-table tr.selected { background: var(--accent-soft); }
+    .pill { display: inline-block; padding: 2px 7px; border-radius: 999px; background: #eef2f6; white-space: nowrap; }
+    .pill.dispatching, .pill.success { color: var(--ok); background: #eaf7ef; }
+    .pill.matched_dispatch_disabled { color: var(--warn); background: #fff5df; }
+    .pill.ignored { color: var(--muted); }
+    .pill.failed, .pill.error { color: var(--bad); background: #fff0ee; }
+    .pill.deleted { color: var(--bad); background: #fff0ee; font-weight: 700; }
+    .pill.match { color: var(--violet); background: #f0edff; }
+    .deleted-row { background: #fff8f7; }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+    .check-label { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-top: 18px; }
+    .check-label input { width: 16px; height: 16px; padding: 0; }
+    input, select, button {
       width: 100%;
       height: 34px;
       border: 1px solid var(--line);
@@ -1152,108 +1930,603 @@ def ui() -> str:
       padding: 0 9px;
       background: #fff;
       color: var(--text);
-    }}
-    button {{ cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); }}
-    .detail {{
-      white-space: pre-wrap;
-      max-height: 520px;
-      overflow: auto;
-      background: #111827;
-      color: #f9fafb;
-      padding: 12px;
+    }
+    button { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+    button.secondary { background: #fff; color: var(--accent); }
+    button.ghost { background: var(--panel-soft); color: var(--text); border-color: var(--line); }
+    button.small { width: auto; height: 28px; padding: 0 8px; font-size: 12px; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .link-btn { width: auto; height: auto; border: 0; background: transparent; color: var(--accent); padding: 0; font: inherit; text-decoration: underline; }
+    a { color: var(--accent); }
+    .detail-layout { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .detail-side, .detail-main { min-width: 0; }
+    .summary-list { display: grid; gap: 8px; }
+    .summary-row { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 7px; }
+    .summary-row span { color: var(--muted); }
+    .summary-row code, .summary-row strong { overflow-wrap: anywhere; }
+    .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
+    .tab { width: auto; background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 6px 9px; }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .empty {
+      border: 1px dashed var(--line);
+      background: var(--panel-soft);
+      color: var(--muted);
+      padding: 18px;
       border-radius: 6px;
-      display: none;
-    }}
-    a {{ color: var(--accent); }}
+    }
+    .mini-table { border: 1px solid var(--line); max-height: 420px; overflow: auto; }
+    .field-row.located, .json-leaf.located, details.located > summary { background: #fff7cf; }
+    .match-list { display: grid; gap: 8px; }
+    .match-item {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      background: #fff;
+    }
+    .match-top { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .match-path { color: var(--muted); overflow-wrap: anywhere; }
+    mark { background: var(--mark); padding: 0 2px; border-radius: 3px; }
+    .json-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .json-tree {
+      border: 1px solid var(--line);
+      background: #fbfcfe;
+      max-height: 560px;
+      overflow: auto;
+      padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .json-tree details { margin-left: 14px; }
+    .json-tree summary { cursor: pointer; padding: 2px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+    .json-leaf { margin-left: 18px; padding: 2px 4px; border-radius: 4px; overflow-wrap: anywhere; }
+    .json-key { color: #365f7c; }
+    .json-type { color: var(--muted); }
+    .json-value { color: #3b3f46; }
+    .row-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .wide { grid-column: span 2; }
+    @media (max-width: 900px) {
+      header, section { padding-left: 16px; padding-right: 16px; }
+      .detail-layout { grid-template-columns: 1fr; }
+      .wide { grid-column: span 1; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>Feishu Listener</h1>
-    <div class="subtle">ws_status={escape(str(state["ws_status"]))} · last_event_at={escape(str(state["last_event_at"]))}</div>
+    <div>
+      <h1>Feishu Listener</h1>
+      <div class="subtle">ws_status=__WS_STATUS__ | last_event_at=__LAST_EVENT_AT__</div>
+    </div>
+    <div class="subtle">Field-level history search</div>
   </header>
   <main>
     <section>
       <h2>Overview</h2>
       <div class="grid">
-        <div class="metric"><span>Events</span><strong>{stats_data["event_count"]}</strong></div>
-        <div class="metric"><span>Dispatch Attempts</span><strong>{stats_data["dispatch_attempt_count"]}</strong></div>
-        <div class="metric"><span>DB Size</span><strong>{format_bytes(stats_data["db_size_bytes"])}</strong></div>
-        <div class="metric"><span>Retention</span><strong>{escape(str(stats_data["retention"].get("max_days")))}d / {escape(str(stats_data["retention"].get("max_events")))}</strong></div>
-        {status_cards}
+        <div class="metric"><span>Events</span><strong>__EVENT_COUNT__</strong></div>
+        <div class="metric"><span>Dispatch Attempts</span><strong>__ATTEMPT_COUNT__</strong></div>
+        <div class="metric"><span>Deleted Events</span><strong>__DELETED_COUNT__</strong></div>
+        <div class="metric"><span>DB Size</span><strong>__DB_SIZE__</strong></div>
+        <div class="metric"><span>Retention</span><strong>__RETENTION__</strong></div>
+        <div class="metric"><span>First Event</span><strong><code>__FIRST_EVENT_AT__</code></strong></div>
+        <div class="metric"><span>Last Event</span><strong><code>__LAST_DB_EVENT_AT__</code></strong></div>
+        __STATUS_CARDS__
       </div>
     </section>
 
     <section>
-      <h2>Routes</h2>
+      <div class="toolbar">
+        <h2>Routes</h2>
+      </div>
       <div class="scroll">
         <table>
           <thead><tr><th>Name</th><th>Enabled</th><th>Dispatch</th><th>Event Type</th><th>Table</th><th>Webhook</th></tr></thead>
-          <tbody>{route_rows}</tbody>
+          <tbody>__ROUTE_ROWS__</tbody>
         </table>
       </div>
     </section>
 
     <section>
-      <h2>Events</h2>
-      <div class="filters">
-        <input id="status" placeholder="status">
-        <input id="route_name" placeholder="route_name">
-        <input id="table_id" placeholder="table_id">
-        <input id="record_id" placeholder="record_id">
-        <button onclick="loadEvents()">Filter</button>
+      <div class="toolbar">
+        <h2>Events</h2>
+        <div class="actions">
+          <button class="secondary small" onclick="showDeletedOnly()">Deleted only</button>
+          <button class="secondary small" id="newerBtn" onclick="pageRelative(-1)">Newer page</button>
+          <button class="secondary small" id="olderBtn" onclick="pageRelative(1)">Older page</button>
+        </div>
       </div>
-      <div class="scroll">
-        <table>
-          <thead><tr><th>ID</th><th>Created</th><th>Status</th><th>Dispatch</th><th>Route</th><th>Table</th><th>Record</th><th>Event</th></tr></thead>
-          <tbody id="events">{event_rows}</tbody>
+      <div class="filters">
+        <label>Keyword
+          <input id="q" placeholder="event_id, error, value">
+        </label>
+        <label>Status
+          <input id="status" placeholder="ignored / dispatching">
+        </label>
+        <label>Route
+          <input id="route_name" placeholder="route_name">
+        </label>
+        <label>Event Type
+          <input id="event_type" placeholder="drive.file...">
+        </label>
+        <label>App Token
+          <input id="app_token" placeholder="app_token">
+        </label>
+        <label>Table ID
+          <input id="table_id" placeholder="table_id">
+        </label>
+        <label>Record ID
+          <input id="record_id" placeholder="record_id">
+        </label>
+        <label>Chat ID
+          <input id="chat_id" placeholder="chat_id">
+        </label>
+        <label>Command
+          <input id="command" placeholder="/command">
+        </label>
+        <label class="check-label">
+          <input id="deleted_only" type="checkbox">
+          Deleted only
+        </label>
+        <label>Deleted Record
+          <input id="deleted_record_id" placeholder="deleted record_id">
+        </label>
+        <label>Deleted By
+          <input id="deleted_by" placeholder="open_id / user_id / union_id">
+        </label>
+        <label>Created From
+          <input id="created_from" type="datetime-local">
+        </label>
+        <label>Created To
+          <input id="created_to" type="datetime-local">
+        </label>
+        <label>Field ID
+          <input id="field_id" placeholder="fld...">
+        </label>
+        <label>Field Path
+          <input id="field_path" placeholder="raw.event.action_list">
+        </label>
+        <label>Field Key
+          <input id="field_key" placeholder="field_value / users">
+        </label>
+        <label class="wide">Field Value
+          <input id="field_value" placeholder="customer, option id, phone, user name">
+        </label>
+        <label>Source
+          <select id="match_source">
+            <option value="all">all</option>
+            <option value="raw">raw</option>
+            <option value="normalized">normalized</option>
+          </select>
+        </label>
+        <label>Limit
+          <select id="limit">__LIMIT_OPTIONS__</select>
+        </label>
+        <label>Field Scan Rows
+          <select id="scan_limit">__SCAN_OPTIONS__</select>
+        </label>
+        <label>Sort
+          <select id="sort">
+            <option value="desc" selected>newest first</option>
+            <option value="asc">oldest first</option>
+          </select>
+        </label>
+        <button onclick="applySearch()">Search</button>
+        <button class="ghost" onclick="resetSearch()">Reset</button>
+      </div>
+      <div id="resultInfo" class="subtle"></div>
+      <div class="scroll event-scroll">
+        <table class="event-table">
+          <thead><tr><th>ID</th><th>Created</th><th>Status</th><th>Deleted</th><th>Deleted By</th><th>Dispatch</th><th>Route</th><th>Table</th><th>Record</th><th>Event</th><th>Matches</th></tr></thead>
+          <tbody id="events">__EVENT_ROWS__</tbody>
         </table>
       </div>
+      <div id="scanNote" class="row-note"></div>
     </section>
 
     <section>
       <h2>Detail</h2>
-      <pre id="detail" class="detail"></pre>
+      <div id="emptyDetail" class="empty">Select an event ID to inspect field changes, matched paths, and JSON tree.</div>
+      <div id="detailContent" class="detail-layout" style="display:none">
+        <aside class="detail-side">
+          <h3>Selected Event</h3>
+          <div id="detailSummary" class="summary-list"></div>
+        </aside>
+        <div class="detail-main">
+          <div class="tabs">
+            <button class="tab active" data-tab="summary">Summary</button>
+            <button class="tab" data-tab="deleted">Deleted Record</button>
+            <button class="tab" data-tab="fields">Field Changes</button>
+            <button class="tab" data-tab="matches">Search Matches</button>
+            <button class="tab" data-tab="json">JSON Tree</button>
+          </div>
+          <div id="tab-summary" class="tab-panel active"></div>
+          <div id="tab-deleted" class="tab-panel"></div>
+          <div id="tab-fields" class="tab-panel"></div>
+          <div id="tab-matches" class="tab-panel"></div>
+          <div id="tab-json" class="tab-panel"></div>
+        </div>
+      </div>
     </section>
   </main>
   <script>
-    function cls(v) {{ return String(v || '').replace(/[^a-zA-Z0-9_-]/g, ''); }}
-    function esc(v) {{
-      return String(v ?? '').replace(/[&<>"']/g, ch => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[ch]));
-    }}
-    async function loadEvents() {{
-      const params = new URLSearchParams({{limit: '100'}});
-      for (const key of ['status', 'route_name', 'table_id', 'record_id']) {{
-        const value = document.getElementById(key).value.trim();
-        if (value) params.set(key, value);
-      }}
-      const res = await fetch('/events?' + params.toString());
-      const data = await res.json();
-      document.getElementById('events').innerHTML = data.events.map(row => `
-        <tr>
-          <td><a href="#" onclick="showDetail(${{row.id}}); return false;">${{row.id}}</a></td>
-          <td><code>${{esc(row.created_at)}}</code></td>
-          <td><span class="pill ${{cls(row.status)}}">${{esc(row.status)}}</span></td>
-          <td><span class="pill ${{cls(row.dispatch_status)}}">${{esc(row.dispatch_status || '')}}</span></td>
-          <td>${{esc(row.route_name || '')}}</td>
-          <td><code>${{esc(row.table_id || '')}}</code></td>
-          <td><code>${{esc(row.record_id || '')}}</code></td>
-          <td>${{esc(row.event_type || '')}}</td>
+    const INITIAL_DATA = __INITIAL_DATA__;
+    const filterKeys = [
+      'q', 'status', 'route_name', 'event_type', 'app_token', 'table_id',
+      'record_id', 'chat_id', 'command', 'deleted_record_id', 'deleted_by',
+      'field_id', 'field_path', 'field_key', 'field_value'
+    ];
+    let currentOffset = 0;
+    let currentTotal = INITIAL_DATA.events.total || 0;
+    let selectedEventId = null;
+
+    function cls(v) { return String(v || '').replace(/[^a-zA-Z0-9_-]/g, ''); }
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function attr(v) { return esc(v).replace(/`/g, '&#96;'); }
+    function escapeRegExp(v) { return String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+    function terms() {
+      return ['q', 'deleted_record_id', 'deleted_by', 'field_id', 'field_key', 'field_value']
+        .map(key => document.getElementById(key)?.value.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+    }
+    function highlight(v) {
+      let output = esc(v ?? '');
+      for (const term of terms()) {
+        const safe = esc(term);
+        if (!safe) continue;
+        output = output.replace(new RegExp(escapeRegExp(safe), 'ig'), '<mark>$&</mark>');
+      }
+      return output;
+    }
+    function localIso(id) {
+      const value = document.getElementById(id).value;
+      return value ? new Date(value).toISOString() : '';
+    }
+    function displayTime(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+    function addParam(params, key, value) {
+      const text = String(value ?? '').trim();
+      if (text) params.set(key, text);
+    }
+    function eventParams(includePaging = true) {
+      const params = new URLSearchParams();
+      const limit = document.getElementById('limit').value || '100';
+      params.set('limit', limit);
+      params.set('sort', document.getElementById('sort').value || 'desc');
+      params.set('match_source', document.getElementById('match_source').value || 'all');
+      params.set('scan_limit', document.getElementById('scan_limit').value || '10000');
+      if (includePaging) params.set('offset', String(currentOffset));
+      for (const key of filterKeys) addParam(params, key, document.getElementById(key).value);
+      if (document.getElementById('deleted_only').checked) params.set('deleted_only', 'true');
+      addParam(params, 'created_from', localIso('created_from'));
+      addParam(params, 'created_to', localIso('created_to'));
+      return params;
+    }
+    function detailParams() {
+      const params = new URLSearchParams();
+      for (const key of ['q', 'field_id', 'field_path', 'field_key', 'field_value']) {
+        addParam(params, key, document.getElementById(key).value);
+      }
+      params.set('match_source', document.getElementById('match_source').value || 'all');
+      return params;
+    }
+    function renderEvents(data) {
+      currentTotal = data.total || 0;
+      const rows = data.events || [];
+      document.getElementById('events').innerHTML = rows.map(row => `
+        <tr class="${row.is_deleted ? 'deleted-row' : ''}">
+          <td><a href="#" onclick="showDetail(${row.id}); return false;">${row.id}</a></td>
+          <td><code>${esc(displayTime(row.created_at))}</code></td>
+          <td><span class="pill ${cls(row.status)}">${esc(row.status)}</span></td>
+          <td>${row.is_deleted ? '<span class="pill deleted">deleted</span>' : ''}</td>
+          <td><code>${highlight(row.deleted_by_user_id || row.deleted_by_open_id || row.deleted_by_union_id || '')}</code></td>
+          <td><span class="pill ${cls(row.dispatch_status)}">${esc(row.dispatch_status || '')}</span></td>
+          <td>${highlight(row.route_name || '')}</td>
+          <td><code>${highlight(row.table_id || '')}</code></td>
+          <td><code>${highlight(row.record_id || '')}</code></td>
+          <td>${highlight(row.event_type || '')}</td>
+          <td>${row.match_count ? `<span class="pill match">${row.match_count}</span>` : ''}</td>
         </tr>
       `).join('');
-    }}
-    async function showDetail(id) {{
-      const res = await fetch('/events/' + id);
+      document.querySelectorAll('.event-table tbody tr').forEach(row => {
+        const id = row.querySelector('a')?.textContent;
+        if (String(selectedEventId || '') === id) row.classList.add('selected');
+      });
+      const start = rows.length ? currentOffset + 1 : 0;
+      const end = currentOffset + rows.length;
+      document.getElementById('resultInfo').textContent = `Showing ${start}-${end} of ${currentTotal} matching events`;
+      document.getElementById('newerBtn').disabled = currentOffset <= 0;
+      document.getElementById('olderBtn').disabled = end >= currentTotal;
+      const fieldSearch = data.field_search || {};
+      document.getElementById('scanNote').textContent = fieldSearch.active
+        ? `Field search scanned ${fieldSearch.scanned} of ${data.candidate_total || 0} candidate rows${fieldSearch.truncated ? '; raise Field Scan Rows to inspect deeper history.' : '.'}`
+        : '';
+    }
+    async function loadEvents() {
+      const res = await fetch('/events?' + eventParams(true).toString());
       const data = await res.json();
-      const el = document.getElementById('detail');
-      el.style.display = 'block';
-      el.textContent = JSON.stringify(data, null, 2);
-      el.scrollIntoView({{behavior: 'smooth', block: 'start'}});
-    }}
+      renderEvents(data);
+    }
+    function applySearch() {
+      currentOffset = 0;
+      loadEvents();
+    }
+    function resetSearch() {
+      for (const key of filterKeys) document.getElementById(key).value = '';
+      document.getElementById('created_from').value = '';
+      document.getElementById('created_to').value = '';
+      document.getElementById('deleted_only').checked = false;
+      document.getElementById('match_source').value = 'all';
+      document.getElementById('sort').value = 'desc';
+      currentOffset = 0;
+      loadEvents();
+    }
+    function showDeletedOnly() {
+      document.getElementById('deleted_only').checked = true;
+      currentOffset = 0;
+      loadEvents();
+    }
+    function pageRelative(direction) {
+      const limit = Number(document.getElementById('limit').value || 100);
+      currentOffset = Math.max(0, currentOffset + direction * limit);
+      loadEvents();
+    }
+    async function showDetail(id) {
+      selectedEventId = id;
+      const detailUrl = '/events/' + id + '?' + detailParams().toString();
+      const detailRes = await fetch(detailUrl);
+      const data = await detailRes.json();
+      renderDetail(data);
+      document.querySelectorAll('.event-table tbody tr').forEach(row => {
+        row.classList.toggle('selected', row.querySelector('a')?.textContent === String(id));
+      });
+      document.getElementById('detailContent').scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+    function summaryRow(label, value, code = false) {
+      return `<div class="summary-row"><span>${esc(label)}</span>${code ? `<code>${highlight(value || '')}</code>` : `<strong>${highlight(value || '')}</strong>`}</div>`;
+    }
+    function renderDetail(data) {
+      document.getElementById('emptyDetail').style.display = 'none';
+      document.getElementById('detailContent').style.display = 'grid';
+      const resource = data.normalized?.resource || {};
+      document.getElementById('detailSummary').innerHTML = [
+        summaryRow('Row ID', data.id, true),
+        summaryRow('Created', displayTime(data.created_at), true),
+        summaryRow('Status', data.status),
+        summaryRow('Deleted', data.deletion?.is_deleted ? 'yes' : 'no'),
+        summaryRow('Deleted By', deletedByText(data.deletion), true),
+        summaryRow('Route', data.route_name || ''),
+        summaryRow('Event Type', data.event_type || ''),
+        summaryRow('App Token', data.app_token || resource.app_token || '', true),
+        summaryRow('Table', data.table_id || resource.table_id || '', true),
+        summaryRow('Record', data.record_id || resource.record_id || '', true),
+        summaryRow('Raw Mode', data.raw_mode || '')
+      ].join('');
+      renderSummaryTab(data);
+      renderDeletedTab(data.deletion || {});
+      renderFieldsTab(data.field_changes || []);
+      renderMatchesTab(data.field_matches || []);
+      renderJsonTab(data);
+      activateTab(data.deletion?.is_deleted ? 'deleted' : ((data.field_matches || []).length ? 'matches' : 'fields'));
+    }
+    function deletedByText(deletion) {
+      if (!deletion?.is_deleted) return '';
+      const by = deletion?.deleted_by || {};
+      return by.display || by.user_id || by.open_id || by.union_id || '';
+    }
+    function renderSummaryTab(data) {
+      const attempts = data.dispatch_attempts || [];
+      const attemptRows = attempts.length ? attempts.map(item => `
+        <tr>
+          <td>${esc(item.attempt)}</td>
+          <td><span class="pill ${cls(item.status)}">${esc(item.status)}</span></td>
+          <td>${esc(item.status_code || '')}</td>
+          <td>${esc(item.elapsed_ms || '')}</td>
+          <td>${highlight(item.error || '')}</td>
+          <td><code>${esc(displayTime(item.created_at))}</code></td>
+        </tr>
+      `).join('') : '<tr><td colspan="6" class="subtle">No dispatch attempts.</td></tr>';
+      document.getElementById('tab-summary').innerHTML = `
+        <div class="mini-table">
+          <table>
+            <thead><tr><th>Attempt</th><th>Status</th><th>HTTP</th><th>ms</th><th>Error</th><th>Created</th></tr></thead>
+            <tbody>${attemptRows}</tbody>
+          </table>
+        </div>`;
+    }
+    function renderDeletedTab(deletion) {
+      if (!deletion?.is_deleted) {
+        document.getElementById('tab-deleted').innerHTML = '<div class="empty">This event is not a bitable record deletion.</div>';
+        return;
+      }
+      const recordRows = (deletion.records || []).map(record => `
+        <tr>
+          <td><code>${highlight(record.record_id || '')}</code></td>
+          <td>${highlight(record.action || '')}</td>
+          <td>${esc(record.before_field_count || 0)}</td>
+          <td>${record.before_summary ? 'summary' : 'full'}</td>
+          <td><code>${highlight(record.path || '')}</code></td>
+        </tr>
+      `).join('');
+      const fieldRows = (deletion.records || []).flatMap(record =>
+        (record.before_fields || []).map(field => `
+          <tr class="field-row" data-change-path="${attr(field.path)}">
+            <td><button class="secondary small" data-field-path="${attr(field.path)}">Locate</button></td>
+            <td><code>${highlight(record.record_id || '')}</code></td>
+            <td><code>${highlight(field.field_id || '')}</code></td>
+            <td>${highlight(field.value_text || '')}</td>
+            <td>${highlight(field.identity_text || '')}</td>
+            <td><code>${highlight(field.path || '')}</code></td>
+          </tr>
+        `)
+      ).join('');
+      document.getElementById('tab-deleted').innerHTML = `
+        <div class="summary-list" style="margin-bottom:12px">
+          ${summaryRow('Deleted By', deletedByText(deletion), true)}
+          ${summaryRow('Open ID', deletion.deleted_by?.open_id || '', true)}
+          ${summaryRow('Union ID', deletion.deleted_by?.union_id || '', true)}
+          ${summaryRow('User ID', deletion.deleted_by?.user_id || '', true)}
+          ${summaryRow('Record Count', deletion.record_count || 0)}
+          ${summaryRow('Field Count', deletion.field_count || 0)}
+          ${summaryRow('Revision', deletion.revision || '', true)}
+        </div>
+        <h3>Deleted Records</h3>
+        <div class="mini-table" style="margin-bottom:12px">
+          <table>
+            <thead><tr><th>Record</th><th>Action</th><th>Before Fields</th><th>Mode</th><th>Path</th></tr></thead>
+            <tbody>${recordRows || '<tr><td colspan="5" class="subtle">No deleted records found.</td></tr>'}</tbody>
+          </table>
+        </div>
+        <h3>Deleted Record Content</h3>
+        <div class="mini-table">
+          <table>
+            <thead><tr><th></th><th>Record</th><th>Field ID</th><th>Deleted Value</th><th>Identity</th><th>Path</th></tr></thead>
+            <tbody>${fieldRows || '<tr><td colspan="6" class="subtle">Only field IDs were captured for this deleted record.</td></tr>'}</tbody>
+          </table>
+        </div>`;
+      bindLocateButtons(document.getElementById('tab-deleted'));
+    }
+    function renderFieldsTab(changes) {
+      const body = changes.length ? changes.map(change => `
+        <tr class="field-row" data-change-path="${attr(change.path)}">
+          <td><button class="secondary small" data-field-path="${attr(change.path)}">Locate</button></td>
+          <td>${esc(change.side || '')}</td>
+          <td>${highlight(change.action || '')}</td>
+          <td><code>${highlight(change.record_id || '')}</code></td>
+          <td><code>${highlight(change.field_id || '')}</code></td>
+          <td>${highlight(change.value_text || '')}</td>
+          <td>${highlight(change.identity_text || '')}</td>
+          <td><code>${highlight(change.path || '')}</code></td>
+        </tr>
+      `).join('') : '<tr><td colspan="8" class="subtle">No bitable field changes in this event payload.</td></tr>';
+      document.getElementById('tab-fields').innerHTML = `
+        <div class="mini-table">
+          <table>
+            <thead><tr><th></th><th>Side</th><th>Action</th><th>Record</th><th>Field ID</th><th>Value</th><th>Identity</th><th>Path</th></tr></thead>
+            <tbody>${body}</tbody>
+          </table>
+        </div>`;
+      bindLocateButtons(document.getElementById('tab-fields'));
+    }
+    function renderMatchesTab(matches) {
+      document.getElementById('tab-matches').innerHTML = matches.length ? `
+        <div class="match-list">
+          ${matches.map(match => `
+            <div class="match-item">
+              <div class="match-top">
+                <span><span class="pill match">${esc(match.kind || 'match')}</span> <code>${highlight(match.key || '')}</code></span>
+                <button class="secondary small" data-field-path="${attr(match.path || '')}">Locate</button>
+              </div>
+              <div>${highlight(match.value || '')}</div>
+              ${match.identity ? `<div class="subtle">${highlight(match.identity)}</div>` : ''}
+              <div class="match-path"><code>${highlight(match.path || '')}</code></div>
+            </div>
+          `).join('')}
+        </div>` : '<div class="empty">No field-level matches for the current search terms.</div>';
+      bindLocateButtons(document.getElementById('tab-matches'));
+    }
+    function renderJsonTab(data) {
+      document.getElementById('tab-json').innerHTML = `
+        <div class="json-tools">
+          <button class="secondary small" onclick="expandJson(true)">Expand</button>
+          <button class="secondary small" onclick="expandJson(false)">Collapse</button>
+        </div>
+        <div id="jsonTree" class="json-tree">
+          ${renderJsonTree(data.normalized || {}, 'normalized', 0)}
+          ${renderJsonTree(data.raw || {}, 'raw', 0)}
+        </div>`;
+    }
+    function renderJsonTree(value, path, depth) {
+      const type = Array.isArray(value) ? 'array' : typeof value;
+      if (value && typeof value === 'object') {
+        const entries = Array.isArray(value)
+          ? value.map((item, index) => [String(index), item, `${path}[${index}]`])
+          : Object.entries(value).map(([key, item]) => [key, item, `${path}.${key}`]);
+        return `<details ${depth < 2 ? 'open' : ''} data-json-path="${attr(path)}">
+          <summary><span class="json-key">${highlight(path)}</span> <span class="json-type">${type} ${entries.length}</span></summary>
+          ${entries.map(([key, item, childPath]) => renderJsonTree(item, childPath, depth + 1)).join('')}
+        </details>`;
+      }
+      return `<div class="json-leaf" data-json-path="${attr(path)}"><span class="json-key">${highlight(path)}</span>: <span class="json-value">${highlight(value)}</span></div>`;
+    }
+    function bindLocateButtons(root) {
+      root.querySelectorAll('[data-field-path]').forEach(button => {
+        button.addEventListener('click', () => locatePath(button.dataset.fieldPath || ''));
+      });
+    }
+    function locatePath(path) {
+      if (!path) return;
+      document.querySelectorAll('.located').forEach(item => item.classList.remove('located'));
+      const fieldRow = Array.from(document.querySelectorAll('[data-change-path]')).find(item => item.dataset.changePath === path);
+      if (fieldRow) {
+        activateTab('fields');
+        fieldRow.classList.add('located');
+        fieldRow.scrollIntoView({behavior: 'smooth', block: 'center'});
+        return;
+      }
+      activateTab('json');
+      const node = Array.from(document.querySelectorAll('[data-json-path]')).find(item => item.dataset.jsonPath === path);
+      if (!node) return;
+      let parent = node.parentElement;
+      while (parent) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
+        parent = parent.parentElement;
+      }
+      node.classList.add('located');
+      node.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
+    function expandJson(open) {
+      document.querySelectorAll('#jsonTree details').forEach(item => { item.open = open; });
+    }
+    function activateTab(name) {
+      document.querySelectorAll('.tab').forEach(tab => tab.classList.toggle('active', tab.dataset.tab === name));
+      document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + name));
+    }
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => activateTab(tab.dataset.tab));
+    });
+    document.querySelectorAll('.filters input').forEach(input => {
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') applySearch();
+      });
+    });
+    renderEvents(INITIAL_DATA.events);
   </script>
 </body>
 </html>
 """
+    return (
+        html.replace("__WS_STATUS__", escape(str(state["ws_status"])))
+        .replace("__LAST_EVENT_AT__", escape(str(state["last_event_at"])))
+        .replace("__EVENT_COUNT__", escape(str(stats_data["event_count"])))
+        .replace("__ATTEMPT_COUNT__", escape(str(stats_data["dispatch_attempt_count"])))
+        .replace("__DELETED_COUNT__", escape(str(stats_data.get("deleted_event_count", 0))))
+        .replace("__DB_SIZE__", escape(format_bytes(stats_data["db_size_bytes"])))
+        .replace(
+            "__RETENTION__",
+            escape(
+                f"{stats_data['retention'].get('max_days')}d / {stats_data['retention'].get('max_events')}"
+            ),
+        )
+        .replace("__FIRST_EVENT_AT__", escape(str(stats_data.get("first_event_at") or "-")))
+        .replace("__LAST_DB_EVENT_AT__", escape(str(stats_data.get("last_event_at") or "-")))
+        .replace("__STATUS_CARDS__", status_cards)
+        .replace("__ROUTE_ROWS__", route_rows)
+        .replace("__EVENT_ROWS__", event_rows)
+        .replace("__LIMIT_OPTIONS__", limit_options)
+        .replace("__SCAN_OPTIONS__", scan_options)
+        .replace("__INITIAL_DATA__", initial_json)
+    )
 
 
 if __name__ == "__main__":

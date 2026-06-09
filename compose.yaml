@@ -15,6 +15,12 @@ services:
       - TZ=Asia/Shanghai
       - GENERIC_TIMEZONE=Asia/Shanghai
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - FEISHU_APP_ID=${FEISHU_APP_ID}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      - FEISHU_BASE_ID=${FEISHU_BASE_ID}
+      - FEISHU_TABLE_ID=${FEISHU_TABLE_ID}
+      - FEISHU_CHAT_ID=${FEISHU_CHAT_ID}
     restart: unless-stopped
 
   pdf-parser:
