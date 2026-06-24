@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 import yaml
@@ -964,6 +964,16 @@ def choose_raw_payload(
     return raw, "full"
 
 
+def format_route_actions(actions: Any) -> str:
+    if actions is None:
+        return "-"
+    if isinstance(actions, list):
+        text = ", ".join(str(item) for item in actions if str(item).strip())
+        return text or "-"
+    text = str(actions).strip()
+    return text or "-"
+
+
 def format_bytes(value: int) -> str:
     size = float(value)
     for unit in ["B", "KB", "MB", "GB"]:
@@ -1363,7 +1373,100 @@ def find_event_matches(
     return matches
 
 
-def action_field_tokens(event: Dict[str, Any], field_id: str) -> List[str]:
+ACTION_ADDED_ALIASES = {"record_added", "added", "new"}
+ACTION_EDITED_ALIASES = {"record_edited", "edited", "update", "updated"}
+ACTION_DELETED_ALIASES = {"record_deleted", "record_delete", "delete_record", "deleted", "delete"}
+
+
+def canonical_action_name(raw: str) -> str:
+    name = str(raw or "").strip().casefold()
+    if not name:
+        return ""
+    if name in ACTION_ADDED_ALIASES:
+        return "record_added"
+    if name in ACTION_EDITED_ALIASES:
+        return "record_edited"
+    if name in ACTION_DELETED_ALIASES:
+        return "record_deleted"
+    if "delete" in name and "record" in name:
+        return "record_deleted"
+    if "add" in name and "record" in name:
+        return "record_added"
+    if "edit" in name and "record" in name:
+        return "record_edited"
+    return name
+
+
+def action_dict_name(action: Dict[str, Any]) -> str:
+    if not isinstance(action, dict):
+        return ""
+    if is_delete_action(action):
+        return "record_deleted"
+    raw_name = str(action.get("action") or action.get("type") or "").strip()
+    return canonical_action_name(raw_name)
+
+
+def route_allowed_actions(route: Dict[str, Any]) -> Optional[Set[str]]:
+    configured = route.get("actions")
+    if configured is None:
+        return None
+    items = configured if isinstance(configured, list) else [configured]
+    allowed: Set[str] = set()
+    for item in items:
+        name = canonical_action_name(str(item))
+        if name:
+            allowed.add(name)
+    return allowed if allowed else None
+
+
+def event_action_names(event: Dict[str, Any]) -> List[str]:
+    raw_event = (event.get("raw") or {}).get("event") or {}
+    actions = raw_event.get("action_list") or []
+    names: List[str] = []
+    if not isinstance(actions, list):
+        return names
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        name = action_dict_name(action)
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def actions_match(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
+    allowed = route_allowed_actions(route)
+    if allowed is None:
+        return True
+    event_names = event_action_names(event)
+    return any(name in allowed for name in event_names)
+
+
+def _collect_field_tokens_from_values(
+    values: Any,
+    field_id: str,
+    tokens: List[str],
+) -> None:
+    if not isinstance(values, list):
+        return
+    for field in values:
+        if not isinstance(field, dict):
+            continue
+        if str(field.get("field_id") or "") != str(field_id):
+            continue
+        for value in extract_field_tokens(field.get("field_value")):
+            if value not in tokens:
+                tokens.append(value)
+        for value in extract_field_tokens(field.get("field_identity_value")):
+            if value not in tokens:
+                tokens.append(value)
+
+
+def action_field_tokens(
+    event: Dict[str, Any],
+    field_id: str,
+    allowed_actions: Optional[Set[str]] = None,
+) -> List[str]:
     raw_event = (event.get("raw") or {}).get("event") or {}
     actions = raw_event.get("action_list") or []
     tokens: List[str] = []
@@ -1374,29 +1477,26 @@ def action_field_tokens(event: Dict[str, Any], field_id: str) -> List[str]:
     for action in actions:
         if not isinstance(action, dict):
             continue
-        after_values = action.get("after_value") or []
-        if not isinstance(after_values, list):
+        action_name = action_dict_name(action)
+        if allowed_actions is not None and action_name not in allowed_actions:
             continue
-        for field in after_values:
-            if not isinstance(field, dict):
-                continue
-            if str(field.get("field_id") or "") != str(field_id):
-                continue
-            values = extract_field_tokens(field.get("field_value"))
-            values.extend(extract_field_tokens(field.get("field_identity_value")))
-            for value in values:
-                if value not in tokens:
-                    tokens.append(value)
+        _collect_field_tokens_from_values(action.get("after_value"), field_id, tokens)
+        if action_name == "record_deleted":
+            _collect_field_tokens_from_values(action.get("before_value"), field_id, tokens)
 
     return tokens
 
 
-def field_condition_matches(event: Dict[str, Any], condition: Dict[str, Any]) -> bool:
+def field_condition_matches(
+    event: Dict[str, Any],
+    condition: Dict[str, Any],
+    allowed_actions: Optional[Set[str]] = None,
+) -> bool:
     field_id = condition.get("field_id")
     if not field_id:
         return False
 
-    actual_tokens = action_field_tokens(event, str(field_id))
+    actual_tokens = action_field_tokens(event, str(field_id), allowed_actions)
     if "exists" in condition:
         return bool(actual_tokens) is bool(condition.get("exists"))
 
@@ -1418,11 +1518,14 @@ def field_conditions_match(route: Dict[str, Any], event: Dict[str, Any]) -> bool
         conditions = [conditions]
     if not isinstance(conditions, list):
         return False
+    if not conditions:
+        return True
 
+    allowed_actions = route_allowed_actions(route)
     for condition in conditions:
         if not isinstance(condition, dict):
             return False
-        if not field_condition_matches(event, condition):
+        if not field_condition_matches(event, condition, allowed_actions):
             return False
     return True
 
@@ -1445,6 +1548,8 @@ def route_matches(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
             continue
         if str(expected) != str(actual):
             return False
+    if not actions_match(route, event):
+        return False
     return field_conditions_match(route, event)
 
 
@@ -1805,6 +1910,7 @@ def ui() -> str:
         f"<td>{escape(str(route.get('name', '')))}</td>"
         f"<td>{'yes' if route.get('enabled', True) else 'no'}</td>"
         f"<td>{'yes' if route.get('dispatch_enabled') else 'no'}</td>"
+        f"<td>{escape(format_route_actions(route.get('actions')))}</td>"
         f"<td>{escape(str(route.get('event_type', '')))}</td>"
         f"<td>{escape(str(route.get('table_id', '')))}</td>"
         f"<td>{escape(str(route.get('n8n_webhook_url', '')))}</td>"
@@ -2024,7 +2130,7 @@ def ui() -> str:
       </div>
       <div class="scroll">
         <table>
-          <thead><tr><th>Name</th><th>Enabled</th><th>Dispatch</th><th>Event Type</th><th>Table</th><th>Webhook</th></tr></thead>
+          <thead><tr><th>Name</th><th>Enabled</th><th>Dispatch</th><th>Actions</th><th>Event Type</th><th>Table</th><th>Webhook</th></tr></thead>
           <tbody>__ROUTE_ROWS__</tbody>
         </table>
       </div>

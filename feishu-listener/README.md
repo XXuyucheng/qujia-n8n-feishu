@@ -35,7 +35,8 @@ docker compose up -d feishu-listener
 
 1. 飞书推送原始事件 → 服务标准化为 `normalized` 结构。
 2. 按 `routes` **从上到下**逐条匹配，**第一条命中即停止**。
-3. 命中且 `dispatch_enabled: true` 时，POST 到 `n8n_webhook_url`；否则只记录日志。
+3. 单条路由依次检查：表级条件 → `actions`（若配置）→ `field_conditions`（若配置）。
+4. 命中且 `dispatch_enabled: true` 时，POST 到 `n8n_webhook_url`；否则只记录日志。
 
 ### 表级条件（粗筛）
 
@@ -51,6 +52,7 @@ docker compose up -d feishu-listener
 | `table_id` | 表 ID |
 | `chat_id` | 群聊 ID（消息类事件） |
 | `command` | 斜杠命令，如 `/quote` |
+| `actions` | 按 `action_list[].action` 过滤新建/编辑/删除（见下文） |
 
 **示例：某张表任意字段变动都转发**
 
@@ -69,11 +71,54 @@ routes:
 
 `n8n_webhook_url` 请继续使用 Docker 内网地址 `http://n8n:5678/...`，上云后也不需要改成公网域名。
 
+### 操作类型条件（actions）
+
+在表级条件之上，可增加 `actions`，按飞书 `raw.event.action_list[].action` 区分新建行、编辑行、删除行。
+
+| 配置值 | 含义 |
+| --- | --- |
+| `record_added` | 新建行 |
+| `record_edited` | 编辑行 |
+| `record_deleted` | 删除行 |
+
+- **不写 `actions`**：不限制操作类型（与升级前行为一致）。
+- **配置格式**：支持字符串或列表，例如 `actions: record_added` 或 `actions: [record_added, record_edited]`。
+- **列表内 OR**：`actions: [record_added, record_edited]` 表示新建或编辑均可命中。
+- **事件侧 OR**：`action_list` 中任意一条 action 满足即可。
+- **别名**：`added` / `new`、`edited` / `update`、`deleted` / `delete` 会归一化为上述 canonical 值。
+
+**示例：仅新建行**
+
+```yaml
+  - name: quote-table-new-row-only
+    enabled: true
+    dispatch_enabled: false
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: YOUR_APP_TOKEN
+    table_id: tbl91gZyDPCLhlva
+    actions: record_added
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-new-row
+    max_attempts: 3
+    timeout_seconds: 10
+```
+
+**示例：仅编辑行**
+
+```yaml
+    actions: record_edited
+```
+
+**示例：仅删除行**
+
+```yaml
+    actions: record_deleted
+```
+
 ### 字段级条件（细筛）
 
-在表级条件之上，可增加 `field_conditions` 列表。**列表内多条条件为 AND（全部满足才命中）。**
+在表级与 `actions` 条件之上，可增加 `field_conditions` 列表。**列表内多条条件为 AND（全部满足才命中）。**
 
-服务从飞书事件的 `raw.event.action_list[].after_value` 中读取指定 `field_id` 的**变更后值**进行判断。
+服务从通过 `actions` 筛选后的 `action_list` 项中读取指定 `field_id` 的值：新建/编辑优先看 `after_value`；删除行若 `after_value` 无该字段，会 fallback 查 `before_value`。
 
 | 条件写法 | 含义 |
 | --- | --- |
@@ -100,13 +145,32 @@ routes:
     timeout_seconds: 10
 ```
 
+**示例：编辑行 + 字段条件（与上例等价，但显式限定为编辑）**
+
+```yaml
+  - name: quote-table-edit-with-field
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: YOUR_APP_TOKEN
+    table_id: tblYYYYYYYY
+    actions: record_edited
+    field_conditions:
+      - field_id: fldGQVeaKb
+        equals: optDK1JeDR
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-test
+    max_attempts: 3
+    timeout_seconds: 10
+```
+
 ### 重要说明（字段匹配语义）
 
 - **精确到「哪个字段出现在本次变更里、变更后的值是什么」**，不是「从旧值 A 变成新值 B 才触发」。
-- 只检查 `after_value`，**不**比较 `before_value`。
+- 新建/编辑默认只检查 `after_value`；删除行会额外检查 `before_value`。
+- 配置了 `actions` 时，`field_conditions` 只在对应 action 项上评估（避免编辑事件误命中「新建行 + 字段」规则）。
 - 一次编辑可能同时带来多个字段出现在 `after_value`；只要配置的 `field_id` 的变更后值满足条件，就会命中。
 - 选项类字段的 `equals` 通常填**选项 id**（如 `optDK1JeDR`），不是显示名称；可在 Web UI 的事件详情 **Field Changes** 中查看。
-- 若多条路由可能匹配同一事件，**把更具体的规则（带 `field_conditions` 或更小范围 `table_id`）写在前面**。
+- 若多条路由可能匹配同一事件，**把更具体的规则（带 `actions`、`field_conditions` 或更小范围 `table_id`）写在前面**。
 
 ### 如何查清该写什么
 
@@ -127,7 +191,7 @@ routes:
 }
 ```
 
-其中 `event` 为标准化后的对象（含 `resource`、`raw` 等）。更复杂的「从空到有值」等逻辑可在 n8n 工作流内对 `event.raw.event.action_list` 再判断。
+其中 `event` 为标准化后的对象（含 `resource`、`raw` 等）。转发 payload 不会裁剪 `action_list`；更复杂的逻辑仍可在 n8n 工作流内对 `event.raw.event.action_list` 再判断。
 
 ### 其它 config 段
 
@@ -185,3 +249,10 @@ UI 功能：概览统计、只读路由列表、最近事件（默认最多保�
 | `POST` | `/debug/normalize` | 调试标准化（生产建议 `ENABLE_DEBUG_ENDPOINTS=false`） |
 
 事件数据库路径：`feishu-listener/data/events.sqlite`。
+
+## 测试
+
+```bash
+cd feishu-listener
+python -m unittest test_routes.py
+```
