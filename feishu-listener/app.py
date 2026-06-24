@@ -1546,8 +1546,14 @@ def route_matches(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
     for _, expected, actual in checks:
         if expected is None:
             continue
-        if str(expected) != str(actual):
-            return False
+        # support either a single expected value or a list/tuple/set of allowed values
+        if isinstance(expected, (list, tuple, set)):
+            allowed = {str(item) for item in expected}
+            if str(actual) not in allowed:
+                return False
+        else:
+            if str(expected) != str(actual):
+                return False
     if not actions_match(route, event):
         return False
     return field_conditions_match(route, event)
