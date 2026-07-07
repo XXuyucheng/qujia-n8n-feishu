@@ -69,3 +69,16 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/Income_Expenditure_Monitoring
     max_attempts: 3
     timeout_seconds: 10
+  - name: Bill-Re-identification
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl821KbTBpjjyXI
+    actions: record_edited
+    field_conditions:
+      - field_id: fldYNG02fN
+        equals: optELG9msS
+    n8n_webhook_url: http://n8n:5678/webhook/Bill-Re-identification
+    max_attempts: 3
+    timeout_seconds: 10

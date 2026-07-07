@@ -1,0 +1,1166 @@
+tables:
+  income_records:
+    name: 业务收入记录
+    table_id: tblABGfJ0B1sE5tV
+    fields:
+      - id: fldw9sa0WQ
+        type: 3
+        name: 类型
+        property:
+          options:
+            - id: optgUHwD7r
+              name: 业务收入-定金
+              color: 48
+            - id: optZqg3nV4
+              name: 业务收入-预付款
+              color: 51
+            - id: opt0gSaFA1
+              name: 业务收入-尾款
+              color: 33
+            - id: optqJC20yH
+              name: 业务收入-返利
+              color: 20
+            - id: optX0UHyPO
+              name: 往来-退款
+              color: 30
+            - id: optYOHQQdN
+              name: 往来-走账
+              color: 34
+      - id: fldAbJyX5V
+        type: 19
+        name: 流水金额
+        property:
+          refTableId: tblqObCmK0l85u9s
+          refFieldId: fldgI1ootl
+      - id: fldHPqmoR9
+        type: 20
+        name: 流水编号
+        property:
+          dataType:
+            type: 105
+      - id: fldJivC4qZ
+        type: 1002
+        name: 最后更新时间
+        property:
+          dateFormat: yyyy/MM/dd
+          displayTimeZone: false
+      - id: fldGEoMjaM
+        type: 20
+        name: 多流水关联匹配流水相同订单总金额辅助
+        property:
+          dataType:
+            type: 201
+      - id: fldSl0FQg7
+        type: 1003
+        name: 创建人
+      - id: fld9zI22WE
+        type: 21
+        name: 充值帐户余额
+        property:
+          tableId: tblsPwOQgzvbPNIP
+          multiple: true
+          backFieldId: fldJloIC0J
+      - id: fldgDoUmEY
+        type: 2
+        name: 计数
+        property:
+          formatter: "0"
+      - id: fldB1mHAFr
+        type: 1
+        name: 订单编号（匹配用）
+      - id: fldF1byWPT
+        type: 1005
+        name: 收入编号
+      - id: fldQmqVceq
+        type: 5
+        name: 收款日期
+        property:
+          dateFormat: yyyy/MM/dd
+          displayTimeZone: false
+          autoFill: false
+      - id: fldP4pCStc
+        type: 2
+        name: 收款金额
+        property:
+          formatter: "0.00"
+      - id: fldSXHw7PK
+        type: 21
+        name: 关联流水
+        property:
+          tableId: tblqObCmK0l85u9s
+          multiple: true
+          backFieldId: fldSoWBhYg
+      - id: fldxMIytCv
+        type: 19
+        name: 导入订单流水收入求和
+        property:
+          refTableId: tblqObCmK0l85u9s
+          refFieldId: fldtxGY7Ha
+      - id: fld0vuB3te
+        type: 20
+        name: 财务核验
+        property:
+          dataType:
+            type: 201
+      - id: fld0NHXGnj
+        type: 19
+        name: 关联相同流水业务收入汇总
+        property:
+          refTableId: tblABGfJ0B1sE5tV
+          refFieldId: fldP4pCStc
+      - id: fldcjnKEFE
+        type: 20
+        name: 付款账号
+        property:
+          dataType:
+            type: 201
+      - id: fldu7d7mZ3
+        type: 3
+        name: 扫码备注
+        property:
+          options:
+            - id: opthzAUNOa
+              name: 扫码-微信
+              color: 0
+            - id: optqkBltG3
+              name: 扫码-支付宝
+              color: 1
+            - id: optqM81919
+              name: 扫码-杭州趣加旅行社服务有限公司
+              color: 2
+            - id: optM8qj8hA
+              name: 扫码-杭州趣加文化创意有限公司
+              color: 3
+            - id: optuL9Fcet
+              name: 扫码-杭州趣加企业管理咨询有限公司
+              color: 4
+            - id: optgUlA5B1
+              name: 停用---扫码-杨晓恩支付宝
+              color: 5
+            - id: opte2YFptJ
+              name: 扫码-趣顽
+              color: 6
+      - id: fldTJaYXGP
+        type: 25
+        name: ai
+      - id: fldKeoWcOG
+        type: 19
+        name: 执行日期
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldzCGe9UZ
+      - id: fld24MeVtv
+        type: 20
+        name: 金额
+        property:
+          dataType:
+            type: 201
+      - id: fldUBYeK5c
+        type: 20
+        name: 收入金额计算
+        property:
+          dataType:
+            type: 202
+          formatter: "0.00"
+      - id: fldHBjUZth
+        type: 19
+        name: 策划
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fld6UQO969
+      - id: fldPm6I7rK
+        type: 20
+        name: 单号
+        property:
+          dataType:
+            type: 201
+      - id: fld31abBBx
+        type: 21
+        name: 关联订单
+        property:
+          tableId: tbl91gZyDPCLhlva
+          multiple: false
+          backFieldId: fld6Qc1JqU
+      - id: fldOLoUro6
+        type: 20
+        name: 财务核验 副本
+        property:
+          dataType:
+            type: 201
+      - id: fldX9ZWD29
+        type: 1
+        name: 南瓜-收款备注
+      - id: fldF8IomJM
+        type: 19
+        name: 相同订单合计应收
+        property:
+          refTableId: tblABGfJ0B1sE5tV
+          refFieldId: fldUBYeK5c
+      - id: fldL9UmBcp
+        type: 20
+        name: 收款账号
+        property:
+          dataType:
+            type: 201
+      - id: fld1hhniSz
+        type: 1
+        name: 识别输出
+      - id: fld3J4OHnD
+        type: 1
+        name: 收款时间
+      - id: fld3w0oLM6
+        type: 19
+        name: 执行月份
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldc3uV1I1
+      - id: fldpeuv5SE
+        type: 1001
+        name: 创建时间
+        property:
+          dateFormat: yyyy/MM/dd HH:mm
+          displayTimeZone: true
+      - id: fldcjXyPkv
+        type: 20
+        name: 日期时间
+        property:
+          dataType:
+            type: 201
+      - id: fldkadVPKr
+        type: 17
+        name: 凭证
+      - id: fldRStf6QH
+        type: 19
+        name: 流水金额（已关联同业务收入的流水借方金额求和）
+        property:
+          refTableId: tblqObCmK0l85u9s
+          refFieldId: fldlQoBtIU
+      - id: fld3xSwo3f
+        type: 19
+        name: 关联流水中的对方账户
+        property:
+          refTableId: tblqObCmK0l85u9s
+          refFieldId: fldqTmMtVj
+      - id: flddq9rLRb
+        type: 19
+        name: 订单类型
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fld0hrXcS0
+      - id: fldMPna1tl
+        type: 19
+        name: 客户单位
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldG4YOiIT
+      - id: fld5E2jeCA
+        type: 1
+        name: 导入收入明细
+  quote_records:
+    name: 订单记录
+    table_id: tbl91gZyDPCLhlva
+    fields:
+      - id: fldGQVeaKb
+        type: 3
+        name: 报价生成状态
+        property:
+          options:
+            - id: optDK1JeDR
+              name: 待生成
+              color: 0
+            - id: optxccjgOu
+              name: 已生成
+              color: 1
+            - id: optP1yu7w4
+              name: 生成失败
+              color: 2
+            - id: optXeCCDQ6
+              name: 需重试
+              color: 3
+      - id: fldQU77Q76
+        type: 15
+        name: 出团通知书
+      - id: fld4RzQAZh
+        type: 3
+        name: 订单类型
+        property:
+          options:
+            - id: optEEWAoQ4
+              name: 纯玩
+              color: 37
+            - id: optRV0Mxd4
+              name: 需教练
+              color: 40
+            - id: optYt8c1G8
+              name: 返利
+              color: 0
+            - id: optHEPZLLs
+              name: 活动取消
+              color: 1
+      - id: fldG4YOiIT
+        type: 19
+        name: 单位
+        property:
+          refTableId: tblplCg1voA7Xjgi
+          refFieldId: fld5z2kOwq
+      - id: fldJLGXeJa
+        type: 2
+        name: 合同应收
+        property:
+          formatter: "0.00"
+      - id: fld6UQO969
+        type: 11
+        name: 策划师
+        property:
+          multiple: false
+      - id: fldzCGe9UZ
+        type: 5
+        name: 执行日期
+        property:
+          dateFormat: yyyy/MM/dd
+          displayTimeZone: false
+          autoFill: false
+      - id: fldC8kCWYr
+        type: 20
+        name: 咨询月
+        property:
+          dataType:
+            type: 201
+      - id: fldzrILRVJ
+        type: 20
+        name: 评分
+        property:
+          dataType:
+            type: 202
+          formatter: "0.0"
+      - id: fldrJ91vn9
+        type: 20
+        name: 执行周
+        property:
+          dataType:
+            type: 202
+      - id: fld4Y6qap7
+        type: 3
+        name: 资讯来源
+        property:
+          options:
+            - id: opt4Jw2CgM
+              name: 小红书
+              color: 33
+            - id: optCzPj7VW
+              name: 复购
+              color: 26
+            - id: optNuBQmQ6
+              name: 转介绍
+              color: 39
+            - id: optddF98tP
+              name: 百度
+              color: 0
+            - id: optsemaqPu
+              name: 美团
+              color: 1
+            - id: optVTyyqlj
+              name: 抖音图
+              color: 2
+            - id: optKbvt0TB
+              name: 视频号
+              color: 3
+            - id: opttZtlRGU
+              name: 抖音视
+              color: 4
+            - id: opt6HJTpL6
+              name: 内部转单
+              color: 5
+      - id: fld6Qc1JqU
+        type: 21
+        name: 收入提交
+        property:
+          tableId: tblABGfJ0B1sE5tV
+          multiple: true
+          backFieldId: fld31abBBx
+      - id: flde3mpyhw
+        type: 2
+        name: 合同价款
+        property:
+          formatter: "0"
+      - id: fldllGsvgq
+        type: 3
+        name: 支出明细生成
+        property:
+          options:
+            - id: optvIj2P24
+              name: 待生成
+              color: 0
+            - id: optvPD8Pyr
+              name: 已生成
+              color: 1
+            - id: optWtoEWfB
+              name: 生成失败
+              color: 2
+            - id: optu2SL8fB
+              name: 需重试
+              color: 3
+      - id: fldKahA8KH
+        type: 20
+        name: 利润率
+        property:
+          dataType:
+            type: 202
+          formatter: "0.00%"
+      - id: fldOloCwjc
+        type: 3
+        name: 订单核查
+        property:
+          options:
+            - id: optvBFVUye
+              name: 已核查结团
+              color: 37
+            - id: optlE6omK7
+              name: 已核查亏损
+              color: 54
+            - id: optlnjQckP
+              name: 待核查
+              color: 40
+            - id: optaYPHvY8
+              name: 已核查尾款拖欠
+              color: 33
+            - id: optqikSbk8
+              name: 已核查无返利
+              color: 43
+      - id: fldwblGY3Z
+        type: 1005
+        name: 订单号
+      - id: fldH04SEPe
+        type: 20
+        name: 提取合计应收-辅助查询
+        property:
+          dataType:
+            type: 201
+      - id: fldYKc8smy
+        type: 21
+        name: 支出提交
+        property:
+          tableId: tbl8jKSb6kHvKlCL
+          multiple: true
+          backFieldId: fld0ajh7ML
+      - id: fldE2RB1Pq
+        type: 1001
+        name: 记录创建时间
+        property:
+          dateFormat: yyyy/MM/dd HH:mm
+          displayTimeZone: false
+      - id: fldT44xVGo
+        type: 19
+        name: 合计应收
+        property:
+          refTableId: tblABGfJ0B1sE5tV
+          refFieldId: fldF8IomJM
+      - id: fldsuKm8jW
+        type: 1
+        name: 客户需求
+      - id: fld0Suh8bY
+        type: 20
+        name: 合计未收
+        property:
+          dataType:
+            type: 202
+          formatter: "0.00"
+      - id: fldsE76zZ2
+        type: 3
+        name: 目的地
+      - id: fldw05EiId
+        type: 1
+        name: 检查备注
+      - id: fld8GNF8H4
+        type: 20
+        name: 是否计算执行费
+        property:
+          dataType:
+            type: 201
+      - id: fldhuA9vwz
+        type: 15
+        name: 报价单
+      - id: fld58viJTj
+        type: 20
+        name: 萝卜执行费
+        property:
+          dataType:
+            type: 201
+      - id: fld1QdGtzJ
+        type: 19
+        name: 联系人
+        property:
+          refTableId: tblplCg1voA7Xjgi
+          refFieldId: fld0lQryPN
+      - id: fldk18yavW
+        type: 2
+        name: 咨询人数
+        property:
+          formatter: "0"
+      - id: fldpSjr7fA
+        type: 11
+        name: 运营
+        property:
+          multiple: false
+      - id: fldShtKviZ
+        type: 3
+        name: 天数
+      - id: fldbOBdA2b
+        type: 19
+        name: 合计应支
+        property:
+          refTableId: tbl8jKSb6kHvKlCL
+          refFieldId: fldw8ab8mV
+      - id: fldD9dVl7Y
+        type: 19
+        name: 已开票金额
+        property:
+          refTableId: tbl1qdQwcE3jEjlR
+          refFieldId: fld8FQscfO
+      - id: fldnoZTSus
+        type: 5
+        name: 登报时间
+        property:
+          dateFormat: yyyy-MM-dd
+          displayTimeZone: false
+          autoFill: true
+      - id: fld8TKYCGN
+        type: 15
+        name: 结算单
+      - id: fldLgvgk7u
+        type: 3
+        name: 当前阶段
+        property:
+          options:
+            - id: optaA34urB
+              name: 建立联系
+              color: 0
+            - id: optefgRB2Y
+              name: 需求挖掘
+              color: 1
+            - id: opt5UFJdMj
+              name: 方案认可
+              color: 2
+            - id: optse3kPxe
+              name: 成交推进
+              color: 3
+            - id: optrs8YgUC
+              name: 失联挂起
+              color: 4
+            - id: optBFrgIPL
+              name: 等待挂起
+              color: 5
+            - id: opt89XS8EB
+              name: 遇阻待定
+              color: 7
+      - id: fldVNtmfLv
+        type: 3
+        name: 当前卡点
+        property:
+          options:
+            - id: optnmBnHou
+              name: 价格高超预算
+              color: 42
+            - id: optryp4ezu
+              name: 其他方案对比
+              color: 41
+            - id: optgR4DTiH
+              name: 担心效果问题
+              color: 40
+            - id: optsElTiCJ
+              name: 领导团队商量
+              color: 38
+            - id: optLWakw9g
+              name: 待定以后再说
+              color: 35
+            - id: optS1FyymY
+              name: 自己搞不外包
+              color: 5
+      - id: fldgem4mW8
+        type: 4
+        name: 出发月份
+        property:
+          options:
+            - id: optqF7wmVG
+              name: 上旬
+              color: 42
+            - id: optKwQPHYZ
+              name: 中旬
+              color: 40
+            - id: optWwmuAok
+              name: 下旬
+              color: 34
+            - id: optIYhn2Bn
+              name: 5月
+              color: 5
+            - id: opt8YjTksb
+              name: 6月
+              color: 0
+            - id: optXUhpmwF
+              name: 7月
+              color: 6
+            - id: optQI3Y3hS
+              name: 8月
+              color: 7
+            - id: optG96Wfj4
+              name: 9月
+              color: 8
+            - id: opt02rTQ5b
+              name: 10月
+              color: 9
+            - id: optPp1SdXZ
+              name: 11月
+              color: 1
+            - id: optrz8KNe8
+              name: 12月
+              color: 2
+            - id: optozHKthQ
+              name: 1月
+              color: 5
+            - id: opttOqXtqT
+              name: 2月
+              color: 1
+            - id: opt8UrThKf
+              name: 3月
+              color: 2
+            - id: optXzlCgH3
+              name: 4月
+              color: 3
+      - id: fldcPzshcS
+        type: 17
+        name: 合同
+        property:
+          onlyMobile: false
+      - id: fldOBauw1V
+        type: 1
+        name: 原订单号
+      - id: fldqepVMRB
+        type: 25
+        name: 豆包 2.0 （多模态+深度思考）
+      - id: fldZK8H4Yc
+        type: 1
+        name: 豆包 2.0 （多模态+深度思考）.输出结果
+      - id: fldXeKnKDu
+        type: 3
+        name: 咨询号名称
+      - id: fldQICQwsb
+        type: 1
+        name: 笔记关键词
+      - id: fldaMndfTK
+        type: 21
+        name: 客户信息录入
+        property:
+          tableId: tblplCg1voA7Xjgi
+          multiple: true
+          backFieldId: fldmqJFTIM
+      - id: fldIeukEaF
+        type: 1
+        name: 网名
+      - id: fldc3uV1I1
+        type: 20
+        name: 执行月
+        property:
+          dataType:
+            type: 201
+      - id: fldSizHR0x
+        type: 3
+        name: 出行天数
+        property:
+          options:
+            - id: optPuvVXHX
+              name: 1日
+              color: 0
+            - id: optlsdfnGu
+              name: 2日
+              color: 1
+            - id: optNoVvBCu
+              name: 3日
+              color: 2
+      - id: fldel2QAvI
+        type: 3
+        name: 成交状态
+        property:
+          options:
+            - id: optk5r34R7
+              name: 已成交
+              color: 26
+            - id: optMZzWYO1
+              name: 跟进中
+              color: 7
+            - id: optP7PIvRj
+              name: 重复单
+              color: 10
+            - id: optYy5mrPy
+              name: 驳回单
+              color: 54
+            - id: opt9wGu6kw
+              name: 失败单
+              color: 33
+            - id: optPy9woLO
+              name: 待定单
+              color: 0
+            - id: optTUpcyo7
+              name: 待成交
+              color: 1
+            - id: optWs98LYt
+              name: 待成交
+              color: 17
+            - id: optlKTN7wS
+              name: 待定单
+              color: 2
+      - id: fld5enClxS
+        type: 3
+        name: 通知书生成状态
+        property:
+          options:
+            - id: optDsTqtUW
+              name: 待生成
+              color: 0
+            - id: optLNIlC1Q
+              name: 已生成
+              color: 1
+            - id: optaMSCwPE
+              name: 生成失败
+              color: 2
+            - id: optgTEAGHp
+              name: 需重试
+              color: 3
+      - id: fldxKoxZFC
+        type: 20
+        name: 咨询周
+        property:
+          dataType:
+            type: 201
+      - id: fldzjPX5G6
+        type: 19
+        name: 合计已收
+        property:
+          refTableId: tblABGfJ0B1sE5tV
+          refFieldId: fldP4pCStc
+      - id: fldU069VBi
+        type: 21
+        name: 发票申请
+        property:
+          tableId: tbl1qdQwcE3jEjlR
+          multiple: true
+          backFieldId: fldpvw6Woi
+      - id: fldyEzohn1
+        type: 20
+        name: 应收毛利
+        property:
+          dataType:
+            type: 202
+          formatter: "0.00"
+      - id: fldf39JA6J
+        type: 15
+        name: 出团计划单
+      - id: fldXlh4CA0
+        type: 1003
+        name: 创建人
+      - id: fldtbIxVRj
+        type: 3
+        name: 合同生成状态
+        property:
+          options:
+            - id: optDsTqtUW
+              name: 待生成
+              color: 0
+            - id: optLNIlC1Q
+              name: 已生成
+              color: 1
+            - id: optaMSCwPE
+              name: 生成失败
+              color: 2
+            - id: optgTEAGHp
+              name: 需重试
+              color: 3
+      - id: fldjnAbgYZ
+        type: 4
+        name: 签约单位
+        property:
+          options:
+            - id: optwCTYuUU
+              name: 趣加旅社
+              color: 26
+            - id: optdmKSWaS
+              name: 趣加文化创意
+              color: 37
+            - id: optULn9ulv
+              name: 趣顽
+              color: 26
+            - id: opttZiDX7X
+              name: 旅苑国际旅行社有限公司第一分公司
+              color: 33
+            - id: optOVBxAzB
+              name: 趣加体育文化
+              color: 33
+            - id: optsiwh4Sy
+              name: 趣加管理咨询
+              color: 33
+            - id: opt6WcvVCx
+              name: 趣加体育活动策划
+              color: 33
+            - id: optX5OPpd3
+              name: 知合户外
+              color: 33
+            - id: opt6VdXAFQ
+              name: 杭州市钱塘区华可文化创意工作室
+              color: 37
+            - id: optojSKziB
+              name: 杭州市上城区鱼生活动策划工作室（个体工商户）
+              color: 37
+            - id: optS0hK4Fg
+              name: 杭州市上城区典金文化创意工作室(个体工商户)
+              color: 37
+            - id: opt3gRMHCf
+              name: 不开票
+              color: 9
+            - id: optJOAsyhd
+              name: 待定
+              color: 0
+      - id: fld7NtcZK4
+        type: 21
+        name: 跟进记录
+        property:
+          tableId: tbldLqd4cIyBy25Q
+          multiple: true
+          backFieldId: fldJGf0rZW
+      - id: fldp9i5Qgt
+        type: 20
+        name: 收入支出比
+        property:
+          dataType:
+            type: 202
+          formatter: "0%"
+      - id: fldN6AbIN0
+        type: 3
+        name: 是否投流
+        property:
+          options:
+            - id: optRkprnlz
+              name: 自然流
+              color: 23
+            - id: opttjieSb4
+              name: 投流
+              color: 40
+            - id: opt8EPwJTi
+              name: 不清楚
+              color: 42
+            - id: optog16HSe
+              name: 截流
+              color: 17
+      - id: fldNqXYg0Y
+        type: 3
+        name: 驳回原因
+        property:
+          options:
+            - id: optg0hc53p
+              name: 驳回/微信不通过、初次联系不上
+              color: 54
+            - id: optG5SMyX5
+              name: 驳回/活动延期无期限，活动取消
+              color: 54
+            - id: optHUzSG40
+              name: 驳回/客户弱沟通，随口问问（需主管判定）
+              color: 54
+            - id: opt60qQcZs
+              name: 驳回/同行，（不愿意客户拉群沟通，套方案）
+              color: 54
+            - id: optmravKmt
+              name: 驳回/资源库以外（足浴、汤泉、外省）
+              color: 54
+            - id: optYWmIkKf
+              name: 驳回/预算低到成本不覆盖
+              color: 54
+            - id: opthex6DX0
+              name: 失败/策划主观放弃(利润低)
+              color: 33
+            - id: opt1ILexLb
+              name: 失败/突然断联
+              color: 33
+            - id: optFpsq5fF
+              name: 失败/竞争失败
+              color: 33
+            - id: optKDHS5tI
+              name: 失败/内部指定
+              color: 33
+      - id: fldrKivk6o
+        type: 1
+        name: 订单质量评分
+      - id: fld0hrXcS0
+        type: 20
+        name: 业务类型
+        property:
+          dataType:
+            type: 3
+          options:
+            - id: optOHRXuhc
+              name: 营地号
+              color: 0
+            - id: optkPsWo7W
+              name: 团建号
+              color: 1
+            - id: opt4PSIK0N
+              name: ""
+              color: 2
+      - id: fldb8YB4gE
+        type: 3
+        name: 结算单生成状态
+        property:
+          options:
+            - id: optDsTqtUW
+              name: 待生成
+              color: 0
+            - id: optLNIlC1Q
+              name: 已生成
+              color: 1
+            - id: optaMSCwPE
+              name: 生成失败
+              color: 2
+            - id: optgTEAGHp
+              name: 需重试
+              color: 3
+      - id: fldt6YiD85
+        type: 19
+        name: 合计支出
+        property:
+          refTableId: tbl8jKSb6kHvKlCL
+          refFieldId: fldw8ab8mV
+      - id: fld57Mdatr
+        type: 19
+        name: 执行人数
+        property:
+          refTableId: tbl821KbTBpjjyXI
+          refFieldId: fldw1TGVjD
+      - id: fld3d5yFvP
+        type: 19
+        name: 联系方式
+        property:
+          refTableId: tblplCg1voA7Xjgi
+          refFieldId: fldIFpN18E
+      - id: fldST2tQJq
+        type: 3
+        name: 执行单生成状态
+        property:
+          options:
+            - id: optDsTqtUW
+              name: 待生成
+              color: 0
+            - id: optLNIlC1Q
+              name: 已生成
+              color: 1
+            - id: optaMSCwPE
+              name: 生成失败
+              color: 2
+            - id: optgTEAGHp
+              name: 需重试
+              color: 3
+      - id: fldH28Fwmj
+        type: 21
+        name: 执行信息
+        property:
+          tableId: tbl821KbTBpjjyXI
+          multiple: true
+          backFieldId: fld56wUBzA
+      - id: fldoKAaZgt
+        type: 4
+        name: 出发地
+      - id: fld0jEG9Ok
+        type: 20
+        name: 记录 ID
+        property:
+          dataType:
+            type: 201
+  invoice_applications:
+    name: 发票申请表
+    table_id: tbl1qdQwcE3jEjlR
+    fields:
+      - id: fldsDfnp2R
+        type: 2
+        name: 开票应收登记
+        property:
+          formatter: "0.0"
+      - id: fldvxaPDTs
+        type: 19
+        name: 策划
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fld6UQO969
+      - id: fldZiWPCfv
+        type: 19
+        name: 合计应收
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldT44xVGo
+      - id: fld0vOmeWY
+        type: 1002
+        name: 最后更新时间
+        property:
+          dateFormat: yyyy/MM/dd
+          displayTimeZone: false
+      - id: fldycaOxA7
+        type: 19
+        name: 合计已开
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldD9dVl7Y
+      - id: fld8FQscfO
+        type: 2
+        name: 开票金额
+        property:
+          formatter: "0.00"
+      - id: fldjz8oL6U
+        type: 4
+        name: 开票内容
+        property:
+          options:
+            - id: optz0Bwrf2
+              name: 普票
+              color: 0
+            - id: optGXfcl0M
+              name: 专票
+              color: 1
+            - id: optAuVBHPV
+              name: 活动费
+              color: 2
+            - id: optxNK9oQV
+              name: 策划费
+              color: 3
+            - id: optqryHto7
+              name: 拓展费
+              color: 4
+            - id: optlR1LTKU
+              name: 培训费
+              color: 5
+            - id: optFB7ckpg
+              name: 会务费
+              color: 6
+            - id: optvxMgVSW
+              name: 会议费
+              color: 7
+            - id: opt0u8axiK
+              name: 团建费
+              color: 8
+            - id: opth054lYm
+              name: 其他咨询服务*咨询费
+              color: 9
+            - id: optEfkglp0
+              name: 外部票
+              color: 10
+            - id: optkUIEG0d
+              name: 场地费
+              color: 0
+            - id: optrSNA6wD
+              name: 现代服务*综合服务
+              color: 1
+            - id: optQcZxZog
+              name: 旅游服务*综合服务费
+              color: 2
+      - id: fldNl10hQG
+        type: 19
+        name: 订单已收
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldzjPX5G6
+      - id: fldNsfpl1y
+        type: 19
+        name: 作废金额
+        property:
+          refTableId: tbl1qdQwcE3jEjlR
+          refFieldId: fld8FQscfO
+      - id: fld3MtvSAR
+        type: 1
+        name: 开票信息
+      - id: fldyuZvYGE
+        type: 20
+        name: 高开差额
+        property:
+          dataType:
+            type: 202
+      - id: fldgINkDVs
+        type: 19
+        name: 签约主体
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldjnAbgYZ
+      - id: fld3OG6WCm
+        type: 1005
+        name: 发票编号
+      - id: fldF2IOize
+        type: 0
+        name: 高开申请
+      - id: fldleNcqtc
+        type: 17
+        name: 发票
+        property:
+          onlyMobile: false
+      - id: fld8vwkB7M
+        type: 5
+        name: 开票日期
+        property:
+          dateFormat: yyyy/MM/dd
+          displayTimeZone: false
+          autoFill: false
+      - id: flde8ISeT1
+        type: 1
+        name: 文本 4
+      - id: fldVwUxn3U
+        type: 1003
+        name: 创建人
+      - id: fldjjHpn6k
+        type: 19
+        name: 执行日期
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldzCGe9UZ
+      - id: fldpvw6Woi
+        type: 21
+        name: 关联订单
+        property:
+          tableId: tbl91gZyDPCLhlva
+          multiple: true
+          backFieldId: fldU069VBi
+      - id: fldFIuhD8t
+        type: 1
+        name: 导入老订单编号
+      - id: fld5AcIqaR
+        type: 3
+        name: 开票状态
+        property:
+          options:
+            - id: optUxpWa8z
+              name: 新增待开
+              color: 40
+            - id: optMiPpOqZ
+              name: 作废待开
+              color: 42
+            - id: optG7ctdUj
+              name: 已开
+              color: 37
+            - id: opt0ZRiw4f
+              name: 作废
+              color: 33
+            - id: opt4WYld0P
+              name: 需要作废
+              color: 0
+            - id: optIYbVkwT
+              name: 作废已开
+              color: 37
+      - id: fldZnxpNxh
+        type: 20
+        name: 剩余可开金额
+        property:
+          dataType:
+            type: 202
+      - id: fldTB9DdNa
+        type: 19
+        name: 合同
+        property:
+          refTableId: tbl91gZyDPCLhlva
+          refFieldId: fldcPzshcS
+      - id: fldg7tVyw0
+        type: 19
+        name: 关联流水对方账户
+        property:
+          refTableId: tblABGfJ0B1sE5tV
+          refFieldId: fld3xSwo3f

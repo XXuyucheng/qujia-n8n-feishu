@@ -9,6 +9,7 @@ n8n-data/
 # Runtime files and logs
 files/tmp/
 feishu-listener/data/
+feishu-field-parser/data/
 backup-broken/
 *.sqlite
 *.sqlite-*
