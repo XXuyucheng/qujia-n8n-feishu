@@ -8,7 +8,7 @@ storage:
   matched_raw_mode: full
 
 routes:
-  - name: invoice-bitable-record-changed
+  - name: invoice-bitable-record-changed # 发票识别
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
@@ -17,7 +17,7 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice
     max_attempts: 3
     timeout_seconds: 10
-  - name: quote-generation-test-bitable-record-changed
+  - name: quote-generation-test-bitable-record-changed # 报价单生成测试
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
@@ -29,25 +29,7 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-test
     max_attempts: 3
     timeout_seconds: 10
-  - name: quote-table-practice-watch
-    enabled: true
-    dispatch_enabled: true
-    event_type: drive.file.bitable_record_changed_v1
-    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
-    actions: record_added
-    table_id:
-      - tbl91gZyDPCLhlva
-      - tblplCg1voA7Xjgi
-      - tbl821KbTBpjjyXI
-      - tbldLqd4cIyBy25Q
-      - tbl1qdQwcE3jEjlR
-      - tbl4vQ8kft1XXSLv
-      - tbl8jKSb6kHvKlCL
-      - tblABGfJ0B1sE5tV
-    n8n_webhook_url: http://n8n:5678/webhook/record_added-tbl91gZyDPCLhlva
-    max_attempts: 3
-    timeout_seconds: 10
-  - name: record_deleted_backup
+  - name: record_deleted_backup #删除数据存档
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
@@ -56,7 +38,7 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/record_deleted_backup
     max_attempts: 3
     timeout_seconds: 10
-  - name: Income_Expenditure_Monitoring
+  - name: Income_Expenditure_Monitoring # 支出金额变动 
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
@@ -69,7 +51,7 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/Income_Expenditure_Monitoring
     max_attempts: 3
     timeout_seconds: 10
-  - name: Bill-Re-identification
+  - name: Bill-Re-identification # 合同重新识别
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
@@ -80,5 +62,18 @@ routes:
       - field_id: fldYNG02fN
         equals: optELG9msS
     n8n_webhook_url: http://n8n:5678/webhook/Bill-Re-identification
+    max_attempts: 3
+    timeout_seconds: 10
+  - name: make-contract #合同生成
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl821KbTBpjjyXI
+    actions: record_edited
+    field_conditions:
+      - field_id: fldKtkrkNU
+        exists: opt3Grubt2
+    n8n_webhook_url: http://n8n:5678/webhook/make-contract
     max_attempts: 3
     timeout_seconds: 10

@@ -1,0 +1,56 @@
+# contract-generator 模板与占位符映射
+# 将 template_token / folder_token 替换为真实飞书 token，或通过环境变量注入 defaults。
+
+defaults:
+  template_token: "${FEISHU_CONTRACT_TEMPLATE_TOKEN}"
+  folder_token: "${FEISHU_CONTRACT_OUTPUT_FOLDER}"
+  document_name_pattern: "合同-{订单号}"
+  required_placeholders:
+    - 甲方名称
+    - 乙方名称
+    - 活动费用
+    - 活动日期
+  rate_limit:
+    read_qps: 4.0
+    write_qps: 3.0
+    copy_retry_max: 3
+    copy_retry_delay_ms: 800
+    batch_size: 20
+    batch_delay_ms: 350
+
+templates: #大括号内是占位符，生成合同时会被替换为n8n传入的实际值 大括号左边是模板中对应的占位符名称
+  趣加旅社:
+    template_token: "QyyUdUdXYoXzklxSUUGcanmenoh"
+    folder_token: "UtBAfoddYlwW3tdA6FTcwiImn1c"
+    document_name_pattern: "合同-{订单号}-趣加旅社"
+    party_b_full_name: "杭州趣加旅社有限公司"
+    placeholders:
+      甲方名称: "{单位}"
+      甲方地址: "{甲方地址}"
+      甲方税号: "{甲方税号}"
+      乙方名称: "@party_b_full_name"
+      乙方地址: "浙江省杭州市滨江区长河街道长江路336号5幢506室"
+      乙方银行账号: "551357570300019"
+      乙方开户行: "台州银行杭州滨江支行"
+      乙方税号: "91330108MAK2NHH72X"
+      活动费用: "{合同价款}"
+      付款方式: "{付款方式}"
+      活动日期: "{执行日期}"
+      # 模板正文是 {{执行人数}}，不是 {{活动人数}}
+      执行人数: "{执行人数}"
+      活动名称: "{活动名称}"
+      签订日期: "@today"
+      活动行程与费用明细: "{活动行程与费用明细}"
+      # 以下 key 当前模板正文中没有对应 {{}}；模板补上后即可生效
+      甲方联系人: "{联系人}"
+      甲方电话: "{联系方式}"
+      策划师: "{策划师}"
+
+signing_unit_map:
+  杭州趣加旅行社服务有限公司: 趣加旅社
+  杭州趣加文化创意有限公司: 趣加文化创意
+  杭州趣顽企业管理咨询有限公司: 趣顽
+  旅苑国际旅行社有限公司第一分公司: 旅苑
+  杭州趣加体育活动策划有限公司: 趣加体育文化
+  杭州趣加企业管理咨询有限公司: 趣加管理咨询
+  

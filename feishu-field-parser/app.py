@@ -53,6 +53,23 @@ def get_table_config(table_key: str) -> Dict[str, Any]:
     return table
 
 
+def resolve_table_key(table_key: str = "", table_id: str = "") -> str:
+    key = str(table_key or "").strip()
+    if key:
+        return key
+
+    tid = str(table_id or "").strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="table_key or table_id is required")
+
+    config = load_config()
+    for candidate_key, table in (config.get("tables") or {}).items():
+        if isinstance(table, dict) and str(table.get("table_id") or "") == tid:
+            return str(candidate_key)
+
+    raise HTTPException(status_code=404, detail=f"Unknown table_id: {tid}")
+
+
 def table_index(table: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {
         str(field.get("id")): field
@@ -119,15 +136,21 @@ def parse_field_value(record: Dict[str, Any], meta: Dict[str, Any], warnings: Li
         return normalize_users(value)
 
     if is_date_field(meta) or bus_type == 5:
-        return normalize_date_value(value)
+        return normalize_date_value(value, meta)
 
     if field_type == 1005:
         return normalize_auto_number(value)
 
+    if is_text_field(meta, bus_type):
+        text = extract_text_segments(value)
+        if text is not None:
+            return text
+
     if field_type in {2, 19, 20} or bus_type == 202:
         return normalize_number_like(value, meta, bus_type)
 
-    return normalize_generic_value(value, meta)
+    result = normalize_generic_value(value, meta)
+    return coerce_readable_value(result)
 
 
 def parse_raw_value(raw: Any, warnings: List[str]) -> Any:
@@ -182,6 +205,65 @@ def collapse_values(values: Any) -> Any:
 def normalize_nested_value(value: Any) -> Any:
     if isinstance(value, dict) and set(value.keys()) == {"value"}:
         return value.get("value")
+    text = extract_text_segments(value)
+    if text is not None:
+        return text
+    return value
+
+
+def extract_text_segments(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text[0] in "[{":
+            parsed = parse_raw_value(text, [])
+            if parsed is not value:
+                nested = extract_text_segments(parsed)
+                if nested is not None:
+                    return nested
+        return text
+
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+
+    if isinstance(value, list):
+        parts: List[str] = []
+        for item in value:
+            part = extract_text_segments(item)
+            if part:
+                parts.append(part)
+        return "".join(parts) if parts else None
+
+    if isinstance(value, dict):
+        if "users" in value:
+            return None
+
+        bus_type, data_values = extract_bus_data(value)
+        if data_values is not None:
+            return extract_text_segments(data_values)
+
+        if value.get("type") == "text" and "text" in value:
+            text = str(value.get("text") or "").strip()
+            return text or None
+
+        if set(value.keys()) == {"value"}:
+            return extract_text_segments(value.get("value"))
+
+    return None
+
+
+def coerce_readable_value(value: Any) -> Any:
+    if isinstance(value, list):
+        converted = [coerce_readable_value(item) for item in value]
+        return converted[0] if len(converted) == 1 else converted
+
+    text = extract_text_segments(value)
+    if text is not None:
+        return text
     return value
 
 
@@ -208,57 +290,115 @@ def map_option_value(value: Any, meta: Dict[str, Any]) -> Any:
     return convert(value)
 
 
-def normalize_users(value: Any) -> Any:
+def format_user_names(value: Any) -> Optional[str]:
     if value is None:
         return None
 
     users = value
     if isinstance(value, dict):
-        users = value.get("users") or value.get("data") or value
+        users = value.get("users") or value.get("data")
+        if users is None and ("name" in value or "enName" in value or "en_name" in value):
+            users = [value]
+    if users is None:
+        return None
     if not isinstance(users, list):
         users = [users]
 
-    normalized = []
+    names: List[str] = []
     for user in users:
         if not isinstance(user, dict):
-            normalized.append(user)
+            if user is not None and str(user).strip():
+                names.append(str(user).strip())
             continue
+        name = user.get("name") or user.get("enName") or user.get("en_name")
+        if name and str(name).strip():
+            names.append(str(name).strip())
 
-        user_id = user.get("user_id") or user.get("userId")
-        if isinstance(user_id, dict):
-            ids = user_id
-        else:
-            ids = {"user_id": user_id} if user_id else {}
-
-        normalized.append(
-            {
-                "name": user.get("name"),
-                "en_name": user.get("en_name") or user.get("enName"),
-                "user_id": ids.get("user_id"),
-                "open_id": ids.get("open_id"),
-                "union_id": ids.get("union_id"),
-                "avatar_url": user.get("avatar_url") or user.get("avatarUrl"),
-            }
-        )
-
-    return normalized[0] if len(normalized) == 1 else normalized
+    if not names:
+        return None
+    return ", ".join(names)
 
 
-def normalize_date_value(value: Any) -> Any:
+def normalize_users(value: Any) -> Any:
+    return format_user_names(value)
+
+
+def feishu_date_format_to_strftime(fmt: str) -> str:
+    replacements = [
+        ("yyyy", "%Y"),
+        ("MM", "%m"),
+        ("dd", "%d"),
+        ("HH", "%H"),
+        ("mm", "%M"),
+        ("ss", "%S"),
+    ]
+    result = fmt
+    for source, target in replacements:
+        result = result.replace(source, target)
+    return result
+
+
+def default_date_format(meta: Dict[str, Any]) -> str:
+    field_type = int_or_none(meta.get("type"))
+    if field_type == 5:
+        return "yyyy/MM/dd"
+    return "yyyy-MM-dd HH:mm:ss"
+
+
+def resolve_date_format(meta: Dict[str, Any]) -> str:
+    fmt = str(((meta.get("property") or {}).get("dateFormat") or "")).strip()
+    return fmt or default_date_format(meta)
+
+
+def parse_date_string(value: str) -> Optional[datetime]:
+    text = value.strip()
+    if not text:
+        return None
+
+    patterns = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+    ]
+    for pattern in patterns:
+        try:
+            return datetime.strptime(text, pattern).replace(tzinfo=LOCAL_TZ)
+        except ValueError:
+            continue
+    return None
+
+
+def normalize_date_value(value: Any, meta: Optional[Dict[str, Any]] = None) -> Any:
+    meta = meta or {}
     if value is None:
         return None
     if isinstance(value, list):
-        converted = [normalize_date_value(item) for item in value]
+        converted = [normalize_date_value(item, meta) for item in value]
         return converted[0] if len(converted) == 1 else converted
     if isinstance(value, dict):
         if "value" in value:
-            return normalize_date_value(value.get("value"))
-        return normalize_generic_value(value, {})
+            return normalize_date_value(value.get("value"), meta)
+        text = extract_text_segments(value)
+        if text is not None:
+            return normalize_date_value(text, meta)
+        return value
 
-    if isinstance(value, (int, float)):
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if re.fullmatch(r"\d{10,13}", stripped):
+            timestamp = float(stripped)
+        else:
+            parsed = parse_date_string(stripped)
+            if parsed is not None:
+                return parsed.strftime(feishu_date_format_to_strftime(resolve_date_format(meta)))
+            return value
+    elif isinstance(value, (int, float)):
         timestamp = float(value)
-    elif isinstance(value, str) and re.fullmatch(r"\d{10,13}", value.strip()):
-        timestamp = float(value.strip())
     else:
         return value
 
@@ -266,7 +406,7 @@ def normalize_date_value(value: Any) -> Any:
         timestamp = timestamp / 1000
 
     dt = datetime.fromtimestamp(timestamp, tz=timezone.utc).astimezone(LOCAL_TZ)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime(feishu_date_format_to_strftime(resolve_date_format(meta)))
 
 
 def normalize_auto_number(value: Any) -> Any:
@@ -289,6 +429,9 @@ def normalize_number_like(value: Any, meta: Dict[str, Any], bus_type: Optional[i
 
     data_type = (((meta.get("property") or {}).get("dataType") or {}).get("type"))
     if int_or_none(data_type) == 201 or bus_type == 201:
+        text = extract_text_segments(value)
+        if text is not None:
+            return text
         return value
     if isinstance(value, (int, float)):
         return value
@@ -305,8 +448,21 @@ def normalize_generic_value(value: Any, meta: Dict[str, Any]) -> Any:
     if isinstance(value, dict):
         if set(value.keys()) == {"value"}:
             return normalize_generic_value(value.get("value"), meta)
+        text = extract_text_segments(value)
+        if text is not None:
+            return text
         return value
     return value
+
+
+def is_text_field(meta: Dict[str, Any], bus_type: Optional[int]) -> bool:
+    if int_or_none(meta.get("type")) == 1:
+        return True
+    if bus_type == 1:
+        return True
+    if int_or_none(meta.get("type")) == 19 and formula_data_type(meta) == 201:
+        return True
+    return False
 
 
 def is_date_field(meta: Dict[str, Any]) -> bool:
@@ -363,6 +519,31 @@ def parse_records(table_key: str, records: List[Dict[str, Any]]) -> Dict[str, An
     return result
 
 
+def format_value_for_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ", ".join(format_value_for_text(item) for item in value if item is not None)
+    return str(value)
+
+
+def format_object_as_text(result: Dict[str, Any]) -> str:
+    lines: List[str] = []
+
+    for name, value in (result.get("object") or {}).items():
+        text = format_value_for_text(value).strip()
+        if not text:
+            continue
+        lines.append(f"{name}: {text}")
+
+    for record in result.get("_unknown_fields") or []:
+        field_id = str(record.get("field_id") or "")
+        raw_value = record.get("field_value")
+        lines.append(f"[未配置字段] {field_id}: {raw_value}")
+
+    return "\n".join(lines)
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
@@ -378,6 +559,7 @@ def api_tables() -> Dict[str, Any]:
             {
                 "key": key,
                 "name": table.get("name") or key,
+                "table_id": table.get("table_id"),
                 "field_count": len(fields),
             }
         )
@@ -386,12 +568,20 @@ def api_tables() -> Dict[str, Any]:
 
 @app.post("/api/parse")
 def api_parse(payload: Dict[str, Any]) -> Dict[str, Any]:
-    table_key = str(payload.get("table_key") or "").strip()
-    if not table_key:
-        raise HTTPException(status_code=400, detail="table_key is required")
-
+    table_key = resolve_table_key(
+        table_key=str(payload.get("table_key") or "").strip(),
+        table_id=str(payload.get("table_id") or "").strip(),
+    )
     records = parse_input_records(payload.get("records"))
-    return parse_records(table_key, records)
+    result = parse_records(table_key, records)
+
+    output_format = str(payload.get("format") or "object").strip().lower()
+    if output_format == "text":
+        result["text"] = format_object_as_text(result)
+    elif output_format not in {"object", ""}:
+        raise HTTPException(status_code=400, detail="format must be object or text")
+
+    return result
 
 
 @app.get("/ui", response_class=HTMLResponse)

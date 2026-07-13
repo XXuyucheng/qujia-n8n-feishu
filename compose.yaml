@@ -37,7 +37,10 @@ services:
     restart: unless-stopped
 
   feishu-listener:
-    build: ./feishu-listener
+    build:
+      context: ./feishu-listener
+      args:
+        BASE_IMAGE: ${FEISHU_LISTENER_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
     container_name: feishu-listener
     ports:
       - "8010:8010"
@@ -58,7 +61,10 @@ services:
     restart: unless-stopped
 
   feishu-field-parser:
-    build: ./feishu-field-parser
+    build:
+      context: ./feishu-field-parser
+      args:
+        BASE_IMAGE: ${FEISHU_FIELD_PARSER_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
     container_name: feishu-field-parser
     ports:
       - "8020:8020"
@@ -68,5 +74,26 @@ services:
       - TZ=Asia/Shanghai
       - FIELD_PARSER_CONFIG_PATH=/app/config.yaml
       - FIELD_PARSER_PORT=8020
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+  contract-generator:
+    build:
+      context: ./contract-generator
+      args:
+        BASE_IMAGE: ${CONTRACT_GENERATOR_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: contract-generator
+    ports:
+      - "8030:8030"
+    volumes:
+      - ./contract-generator/config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - CONTRACT_GENERATOR_CONFIG_PATH=/app/config.yaml
+      - CONTRACT_GENERATOR_PORT=8030
+      - FEISHU_APP_ID=${FEISHU_APP_ID}
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      - FEISHU_CONTRACT_TEMPLATE_TOKEN=${FEISHU_CONTRACT_TEMPLATE_TOKEN:-}
+      - FEISHU_CONTRACT_OUTPUT_FOLDER=${FEISHU_CONTRACT_OUTPUT_FOLDER:-}
       - LOG_LEVEL=INFO
     restart: unless-stopped
