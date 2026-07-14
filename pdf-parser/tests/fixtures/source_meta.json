@@ -1,0 +1,37 @@
+{
+  "taizhou_bank_as_seller": {
+    "attachment_name": "dzfp_26332000004634540926_杭州茱颜改服装有限公司_20260601172910.pdf",
+    "old_buyer": "杭州茱颜改服装有限公司",
+    "old_seller": "台州银行股份有限公司",
+    "invoice_number": "26332000004634540926",
+    "text_file": "taizhou_bank_as_seller.txt"
+  },
+  "ccb_union_buyer": {
+    "attachment_name": "dzfp_26332000004973028826_中国建设银行股份有限公司浙江省分行机关工会委员会_20260611161919.pdf",
+    "old_buyer": "中国建设银行股份有限公司",
+    "old_seller": "台州银行股份有限公司",
+    "invoice_number": "26332000004973028826",
+    "text_file": "ccb_union_buyer.txt"
+  },
+  "bocomm_union_buyer": {
+    "attachment_name": "dzfp_26332000005094686506_交通银行机关工会委员会_20260615175108.pdf",
+    "old_buyer": "台州银行股份有限公司",
+    "old_seller": "",
+    "invoice_number": "26332000005094686506",
+    "text_file": "bocomm_union_buyer.txt"
+  },
+  "you_bank_tech": {
+    "attachment_name": "dzfp_26332000004635286426_杭州佑银行科技有限公司_20260601173127.pdf",
+    "old_buyer": "杭州佑银行科技有限公司",
+    "old_seller": "台州银行股份有限公司",
+    "invoice_number": "26332000004635286426",
+    "text_file": "you_bank_tech.txt"
+  },
+  "food_shop_buyer": {
+    "attachment_name": "dzfp_26332000004863914176_梁溪区参情食品店_20260608165933.pdf",
+    "old_buyer": "台州银行股份有限公司",
+    "old_seller": "梁溪区参情食品店",
+    "invoice_number": "26332000004863914176",
+    "text_file": "food_shop_buyer.txt"
+  }
+}

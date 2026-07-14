@@ -93,58 +93,112 @@ def words_to_text(page) -> str:
     return "\n".join(out)
 
 
+ACCOUNT_BANK_RE = re.compile(
+    r"(?:销方|购方)?开户银行\s*[:：]\s*([^;\n；]+)"
+    r"(?:\s*[;；]?\s*银行账号\s*[:：]\s*\d+)?"
+)
+
+NAME_SUFFIX_RE = re.compile(
+    r"(?:"
+    r"有限责任公司|股份有限公司|有限公司|"
+    r"（个体工商户）|\(个体工商户\)|"
+    r"机关工会委员会|工会委员会|委员会|工会|"
+    r"研究院|大学|幼儿园|"
+    r"餐厅|饭店|酒店|商行|经营部|服务部|工作室|中心|门市部|"
+    r"食品店|店|厂|合作社|分公司|公司"
+    r")$"
+)
+
+NAME_PATTERN_RE = re.compile(
+    r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}"
+    r"(?:"
+    r"有限责任公司|股份有限公司|有限公司|"
+    r"（个体工商户）|\(个体工商户\)|"
+    r"机关工会委员会|工会委员会|委员会|工会|"
+    r"研究院|大学|幼儿园|"
+    r"餐厅|饭店|酒店|商行|经营部|服务部|工作室|中心|门市部|"
+    r"食品店|店|厂|合作社|分公司"
+    r")"
+)
+
+TAX_ID_RE = re.compile(r"\b[0-9A-Z]{15,20}\b")
+
+
+def clean_name(s: str) -> str:
+    s = s.strip()
+    s = re.sub(r"^(名称[:：]?\s*)", "", s)
+    s = re.sub(r"^(购方名称[:：]?\s*)", "", s)
+    s = re.sub(r"^(销方名称[:：]?\s*)", "", s)
+    return s.strip()
+
+
+def looks_like_name(s: str) -> bool:
+    if not s or len(s) < 2 or len(s) > 80:
+        return False
+
+    bad_keywords = [
+        "发票", "开票", "价税", "合计", "税率", "税额", "金额",
+        "项目名称", "规格型号", "下载次数", "备注", "银行账号",
+        "地址", "电话", "开户银行", "包车费", "餐饮费",
+        "出行人", "有效身份证件号", "出行日期", "交通工具类型",
+        "国家税务总局", "发票监制章", "统一社会信用代码", "纳税人识别号",
+        "规格型号", "征收率",
+    ]
+    if any(k in s for k in bad_keywords):
+        return False
+
+    return bool(NAME_SUFFIX_RE.search(s)) or any(
+        k in s
+        for k in (
+            "有限公司", "股份有限公司", "有限责任公司", "个体工商户",
+            "工会", "委员会", "研究院", "大学", "幼儿园",
+            "餐厅", "饭店", "酒店", "商行", "经营部", "服务部",
+            "工作室", "中心", "门市部", "食品店", "店", "厂",
+            "公司", "合作社", "分公司",
+        )
+    )
+
+
+def extract_account_banks(text: str) -> List[str]:
+    banks: List[str] = []
+    for m in ACCOUNT_BANK_RE.finditer(text):
+        value = m.group(1).strip()
+        if value and value not in banks:
+            banks.append(value)
+    return banks
+
+
+def scrub_account_bank_spans(text: str) -> str:
+    return ACCOUNT_BANK_RE.sub("\n", text)
+
+
+def matches_account_bank(name: str, account_banks: List[str]) -> bool:
+    """True when name is (only) the bank entity from an 开户银行 line."""
+    if not name or not account_banks:
+        return False
+    for bank in account_banks:
+        if name == bank or name in bank or bank.startswith(name):
+            # Keep real customers whose full legal name only overlaps loosely
+            # (e.g. 佑银行科技) — require bank-corp shape for soft exclude.
+            if re.search(r"银行股份有限公司$", name):
+                return True
+            if re.search(r"银行.*(?:支行|分行)$", name):
+                return True
+            if name == bank:
+                return True
+    return False
+
+
 def extract_invoice_fields(text: str) -> Dict[str, Any]:
     text = clean_text(text)
+    account_banks = extract_account_banks(text)
+    scrubbed = scrub_account_bank_spans(text)
 
     lines = [
         line.strip()
-        for line in text.splitlines()
+        for line in scrubbed.splitlines()
         if line and line.strip()
     ]
-
-    def clean_name(s: str) -> str:
-        s = s.strip()
-        s = re.sub(r"^(名称[:：]?\s*)", "", s)
-        s = re.sub(r"^(购方名称[:：]?\s*)", "", s)
-        s = re.sub(r"^(销方名称[:：]?\s*)", "", s)
-        return s.strip()
-
-    def looks_like_name(s: str) -> bool:
-        if not s:
-            return False
-
-        bad_keywords = [
-            "发票", "开票", "价税", "合计", "税率", "税额", "金额",
-            "项目名称", "规格型号", "下载次数", "备注", "银行账号",
-            "地址", "电话", "开户银行", "服务", "包车费", "餐饮费",
-            "出行人", "有效身份证件号", "出行日期", "交通工具类型",
-            "国家税务总局", "发票监制章",
-        ]
-
-        if any(k in s for k in bad_keywords):
-            return False
-
-        good_keywords = [
-            "有限公司",
-            "有限责任公司",
-            "股份有限公司",
-            "个体工商户",
-            "餐厅",
-            "饭店",
-            "酒店",
-            "商行",
-            "经营部",
-            "服务部",
-            "工作室",
-            "中心",
-            "门市部",
-            "店",
-            "厂",
-            "公司",
-            "合作社",
-        ]
-
-        return any(k in s for k in good_keywords)
 
     # 1. 发票号码：新版电子发票常见 20 位号码
     invoice_number = ""
@@ -160,89 +214,136 @@ def extract_invoice_fields(text: str) -> Dict[str, Any]:
     if date_match:
         invoice_date = normalize_date(date_match.group(0))
 
-    # 3. 提取纳税人识别号候选
-    tax_ids = []
-    for m in re.finditer(r"\b[0-9A-Z]{15,20}\b", text):
+    # 3. 纳税人识别号候选（排除发票号码）
+    tax_ids: List[str] = []
+    for m in TAX_ID_RE.finditer(scrubbed):
         v = m.group(0)
         if v != invoice_number and v not in tax_ids:
             tax_ids.append(v)
 
-    # 4. 提取名称候选
-    name_candidates = []
+    # 4. Tokenize：名称行 / 税号行（优先税号配对）
+    tokens: List[tuple] = []
+    for line in lines:
+        inline = re.match(
+            r"^(.+?)\s+([0-9A-Z]{15,20})$",
+            line,
+        )
+        if inline and looks_like_name(clean_name(inline.group(1))):
+            tokens.append(("name", clean_name(inline.group(1))))
+            tokens.append(("tax", inline.group(2)))
+            continue
 
-    name_patterns = [
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}有限公司",
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}有限责任公司",
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}股份有限公司",
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}（个体工商户）",
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,80}\(个体工商户\)",
-        r"[\u4e00-\u9fa5A-Za-z0-9（）()·\-]{2,50}(?:餐厅|饭店|酒店|商行|经营部|服务部|工作室|中心|门市部|店|厂|合作社)",
-    ]
+        if re.fullmatch(r"[0-9A-Z]{15,20}", line):
+            if line == invoice_number:
+                tokens.append(("inv", line))
+            else:
+                tokens.append(("tax", line))
+            continue
 
-    for pattern in name_patterns:
-        for m in re.finditer(pattern, text):
-            name = clean_name(m.group(0))
+        candidate = clean_name(line)
+        if looks_like_name(candidate):
+            tokens.append(("name", candidate))
 
-            # 避免把地址、开户行等长句误识别成名称
-            if not looks_like_name(name):
+    paired_names: List[str] = []
+    i = 0
+    while i < len(tokens):
+        kind, value = tokens[i]
+        if kind == "name":
+            j = i + 1
+            while j < len(tokens) and tokens[j][0] not in ("tax", "name"):
+                j += 1
+            if j < len(tokens) and tokens[j][0] == "tax":
+                if value not in paired_names:
+                    paired_names.append(value)
+                i = j + 1
                 continue
+            if value not in paired_names:
+                paired_names.append(value)
+        i += 1
 
-            if name not in name_candidates:
-                name_candidates.append(name)
+    # 名称紧邻税号的反向扫描兜底（版式把税号放在名称下一行）
+    if len(paired_names) < 2:
+        for idx, line in enumerate(lines):
+            if not re.fullmatch(r"[0-9A-Z]{15,20}", line):
+                continue
+            if line == invoice_number:
+                continue
+            for j in range(idx - 1, max(-1, idx - 5), -1):
+                candidate = clean_name(lines[j])
+                if looks_like_name(candidate) and candidate not in paired_names:
+                    paired_names.append(candidate)
+                    break
 
-    # 5. 优先根据名称出现顺序判断购销方
+    # 5. 正则候选（仅在已剔除开户行的文本上）
+    regex_candidates: List[str] = []
+    for m in NAME_PATTERN_RE.finditer(scrubbed):
+        name = clean_name(m.group(0))
+        if not looks_like_name(name):
+            continue
+        if matches_account_bank(name, account_banks):
+            continue
+        if name not in regex_candidates:
+            regex_candidates.append(name)
+
+    # 合并：税号配对优先，再补正则候选
+    name_candidates: List[str] = []
+    for name in paired_names + regex_candidates:
+        if matches_account_bank(name, account_banks):
+            # 税号配对出的主体即使含「银行」也保留（真实客商）
+            if name not in paired_names:
+                continue
+            # 纯开户行短名（台州银行股份有限公司）若同时出现在开户行值中且
+            # 没有独立成对税号以外的证据——paired 里若仅因开户行残留则已 scrub
+            if re.search(r"银行股份有限公司$", name) and any(
+                name in b for b in account_banks
+            ):
+                # 若该名后面没有专属税号配对（只靠正则扫到），上面已 continue；
+                # paired 路径：仅当它真的跟在税号前才保留。建设银行工会全称不含
+                # 「银行股份有限公司$」结尾（以委员会结尾），可通过。
+                if not name.endswith("委员会") and "工会" not in name:
+                    # 检查 tokens 是否 name->tax
+                    has_tax_pair = False
+                    for t_i, (k, v) in enumerate(tokens):
+                        if k == "name" and v == name:
+                            if t_i + 1 < len(tokens) and tokens[t_i + 1][0] == "tax":
+                                has_tax_pair = True
+                                break
+                    if not has_tax_pair:
+                        continue
+        if name not in name_candidates:
+            name_candidates.append(name)
+
+    party_source = "tax_pair" if len(paired_names) >= 2 else (
+        "mixed" if paired_names else "regex"
+    )
+
     buyer_name = name_candidates[0] if len(name_candidates) >= 1 else ""
     seller_name = name_candidates[1] if len(name_candidates) >= 2 else ""
 
-    # 6. 如果名称候选不足，再根据税号附近行兜底
-    if not buyer_name or not seller_name:
-        names_near_tax = []
-
-        for idx, line in enumerate(lines):
-            if not re.search(r"\b[0-9A-Z]{15,20}\b", line):
-                continue
-
-            # 向前找最近的名称行
-            found_name = ""
-            for j in range(idx - 1, max(-1, idx - 8), -1):
-                candidate = clean_name(lines[j])
-                if looks_like_name(candidate):
-                    found_name = candidate
-                    break
-
-            if found_name and found_name not in names_near_tax:
-                names_near_tax.append(found_name)
-
-        if not buyer_name and len(names_near_tax) >= 1:
-            buyer_name = names_near_tax[0]
-
-        if not seller_name:
-            for name in names_near_tax:
-                if name != buyer_name:
-                    seller_name = name
-                    break
-
-    # 7. 防止购销方相同
     if buyer_name and seller_name and buyer_name == seller_name:
-        # 如果候选里有第二个不同名称，用第二个不同名称作为销方
         for name in name_candidates:
             if name != buyer_name:
                 seller_name = name
                 break
-
-        # 如果仍然相同，直接清空销方，交给 n8n 后续失败/AI兜底
         if buyer_name == seller_name:
             seller_name = ""
 
-    # 8. 价税合计：优先取最大 ¥ 金额
-    amounts = []
-    for m in re.finditer(r"[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)", text):
-        try:
-            amounts.append(float(m.group(1)))
-        except Exception:
-            pass
-
-    total_amount = f"{max(amounts):.2f}" if amounts else ""
+    # 6. 价税合计：优先（小写）/ 价税合计 邻近金额，否则取最大 ¥
+    total_amount = ""
+    preferential = re.search(
+        r"(?:（小写）|\(小写\)|价税合计[^\n]{0,30})[^\n¥￥]{0,20}[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)",
+        text,
+    )
+    if preferential:
+        total_amount = f"{float(preferential.group(1)):.2f}"
+    else:
+        amounts = []
+        for m in re.finditer(r"[¥￥]\s*([0-9]+(?:\.[0-9]{1,2})?)", text):
+            try:
+                amounts.append(float(m.group(1)))
+            except Exception:
+                pass
+        total_amount = f"{max(amounts):.2f}" if amounts else ""
 
     return {
         "发票号码": invoice_number,
@@ -252,6 +353,8 @@ def extract_invoice_fields(text: str) -> Dict[str, Any]:
         "价税合计": total_amount,
         "公司名称候选": name_candidates,
         "纳税人识别号候选": tax_ids,
+        "开户银行候选": account_banks,
+        "购销配对来源": party_source,
     }
 
 
