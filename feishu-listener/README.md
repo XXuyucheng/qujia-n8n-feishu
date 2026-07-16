@@ -2,6 +2,17 @@
 
 飞书事件长连接监听服务：接收飞书推送、按 `config.yaml` 路由规则筛选，并将匹配事件转发到 n8n Webhook。事件与转发记录写入 SQLite，可通过 Web UI 查看。
 
+## 双应用长连接
+
+| 应用 | 环境变量 | 事件 | 进程 |
+| --- | --- | --- | --- |
+| 主应用（n8n） | `FEISHU_APP_ID` / `SECRET` | bitable 变更 | 主进程线程内 `lark.ws.Client` |
+| 对话应用（供应商机器人） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1` | 子进程 `chat_ws.py` → `POST /internal/ingest` |
+
+同一进程无法跑两个 lark WS Client（asyncio 冲突），故对话应用使用子进程。健康检查字段：`ws_status`、`chat_ws_status`、`chat_ws_pid`。
+
+供应商 IM 路由示例见 `config.yaml` 中 `supplier-bot-im-message`。
+
 ## 运行方式
 
 服务使用飞书/Lark Python SDK 长连接客户端，**不需要**公网 HTTP 回调 URL。它主动连接飞书，标准化事件后匹配 `config.yaml` 中的 `routes`，并将日志写入 `feishu-listener/data/events.sqlite`。
@@ -127,6 +138,27 @@ routes:
 | `contains: "关键词"` | 变更后的值里，任意 token 包含该子串 |
 | `exists: true` | 本次变更的 `after_value` 中出现该字段 |
 | `exists: false` | 本次变更的 `after_value` 中未出现该字段 |
+
+**`exists` 与 `equals` 的区别**
+
+- `exists: true`：只关心字段**有没有出现在本次变更**里，不关心具体值。例如字段被改成任意选项都会命中。
+- `equals: optXXX`：字段必须出现，且变更后的值里**包含该选项 id** 才命中。
+- 不要用 `exists: optXXX` 代替 `equals`——非空字符串在代码里会被当作 `true`，效果等同于 `exists: true`，不会校验选项值。
+
+**示例：多个选项任意一个命中时转发**
+
+字段变成选项 A、B、C 中任意一个都要触发，用 `equals` 列表（OR）：
+
+```yaml
+    field_conditions:
+      - field_id: fldGQVeaKb
+        equals:
+          - optDK1JeDR
+          - optAnotherOne
+          - optThirdOne
+```
+
+同一字段的多选项应写在一个 `equals` 列表里；若拆成多条 `field_conditions`，会变成 AND，无法表达「A 或 B 或 C」。
 
 **示例：仅当某单选字段变为指定选项时才转发**
 

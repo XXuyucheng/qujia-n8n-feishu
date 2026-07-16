@@ -9,8 +9,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY app.py .
+COPY app.py chat_ws.py .
 COPY config.yaml .
+COPY test_routes.py .
 
 EXPOSE 8010
 

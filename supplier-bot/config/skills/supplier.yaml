@@ -1,0 +1,242 @@
+# Skill: 供应商录入（Phase 1）
+# 改完重启 supplier-bot 即可，一般无需改代码。
+
+id: supplier
+name: 供应商录入
+version: 1
+enabled: true
+triggers:
+- 添加供应商
+- 录入供应商
+- /supplier
+- /供应商
+prompts:
+  start: 开始录入供应商。可一次发齐信息，或分多轮补充；补全阶段可发送收款码图片（支持富文本插图）。
+  summary_title: 已整理供应商信息
+  help_example: '添加供应商：德清某某茶歇
+
+    户名：张三
+
+    账号：6222…
+
+    银行：工行
+
+    地域：德清
+
+    类型：餐厅
+
+    结算类型：月结'
+  need_more_hint: 可继续补充文字，或直接发送收款码图片。回复「取消」结束。
+  confirm_hint: 请回复「确认」写入多维表格，或继续补充修改；「取消」放弃。
+  suggest_hint: 建议补充：{labels}（可继续发送，或回复「跳过」进入确认）
+  cancel: 已取消本次供应商录入。
+  cancel_overwrite: 已取消，未覆盖已有记录。
+  image_before_start: 请先发送「添加供应商」并填写基本信息，再发送收款码图片。
+  group_hint: 支付信息（户名+账号+银行名称，或发送收款码图片）
+  dedupe_ask: 已存在同名「{name}」。回复「覆盖」更新该记录，或「取消」。
+  success: '{action}供应商「{name}」成功。记录 ID：{record_id}'
+commands:
+  cancel:
+  - 取消
+  - 算了
+  - cancel
+  confirm:
+  - 确认
+  - 确定
+  - 提交
+  - true
+  - ok
+  skip:
+  - 跳过
+  - 无
+  - skip
+  overwrite:
+  - 覆盖
+  - 更新
+target:
+  type: bitable
+  base_id: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+  table_id: tbl4vQ8kft1XXSLv
+fields:
+  supplier_name:
+    name: 供应商
+    field_id: fld7NWv9aG
+    type: text
+    required: true
+  account_name:
+    name: 户名
+    field_id: fldWVJNow6
+    type: text
+  account_no:
+    name: 账号
+    field_id: fld1A1tbxM
+    type: text
+  bank_name:
+    name: 银行名称
+    field_id: fld0iMXODu
+    type: single_select
+    options:
+    - 中国银行总行
+    - 中国银行
+    - 浙江泰隆商业银行
+    - 招商银行股份有限公司杭州分行
+    - 招商银行股份有限公司
+    - 中国建设银行股份有限公司总行
+    - 浙江农商银行
+    - 招商银行
+    - 中国农业发展银行
+    - 中国建设银行股份有限公司
+    - 台州银行股份有限公司
+    - 中国农业银行股份有限公司
+    - 中国工商银行
+    - 绍兴银行股份有限公司营业部
+    - 中国光大银行
+    - 中国邮政储蓄银行有限责任公司
+    - 桂林银行股份有限公司
+    - 湖州银行股份有限公司
+    - 华夏银行股份有限公司总行
+    - 宁波鄞州农村商业银行股份有限公司(鄞州银 行)
+    - 杭州银行股份有限公司
+    - 兴业银行总行
+    - 上海农村商业银行
+    - 江苏银行股份有限公司
+    - 中信银行股份有限公司
+    - 安徽省农村信用联社资金清算中心
+    - 宁波银行股份有限公司
+    - 中国民生银行
+    - 交通银行股份有限公司
+    - 平安银行（原深圳发展银行）
+    - 上海浦东发展银行
+    - 南京银行股份有限公司
+    - 张家口银行股份有限公司
+    - 徽商银行股份有限公司
+    - 江苏省农村信用社联合社
+    - 嘉兴银行股份有限公司清算中心(不对外办理业务）
+    - 金华银行股份有限公司
+    - 浙江民泰商业银行
+    - 浙商银行
+    - 浙江网商银行股份有限公司
+    - 九江银行股份有限公司
+    - 浙江长兴联合村镇银行股份有限公司
+    - 渤海银行股份有限公司
+    - 上海银行
+    - 广发银行股份有限公司
+    - 浙江省农村信用社联合社
+  branch:
+    name: 开户支行
+    field_id: flds7eNrXM
+    type: text
+    suggested: true
+  contact:
+    name: 联系方式
+    field_id: fldJZnRXMX
+    type: text
+    suggested: true
+  settlement_type:
+    name: 结算类型
+    field_id: fld5WxScBg
+    type: multi_select
+    suggested: true
+    options:
+    - 符合
+    - 不符
+    - 现结
+    - 周结
+    - 充值
+    - 季结
+    - 月结
+    - 内部
+    - 兼职
+  region:
+    name: 地域
+    field_id: fldTLrLksV
+    type: single_select
+    suggested: true
+    options:
+    - 舟山
+    - 安吉
+    - 德清
+    - 嘉兴
+    - 金华
+    - 苏州
+    - 桐庐
+    - 上海崇明区
+    - 上海奉贤区
+    - 上海青浦区
+    - 千岛湖
+    - 杭州
+    - 湖州
+    - 上海
+    - 绍兴
+  supplier_type:
+    name: 类型
+    field_id: fld2KNLPqA
+    type: single_select
+    suggested: true
+    options:
+    - 酒店
+    - 民宿
+    - 其它
+    - 车队
+    - 景区（基地）
+    - 餐厅
+  scan_note:
+    name: 扫码备注
+    field_id: fldmdR8OD3
+    type: text
+  qrcode:
+    name: 支付宝/微信
+    field_id: fldzomO4r4
+    type: attachment
+require_any_group:
+- - account_name
+  - account_no
+  - bank_name
+- - qrcode
+aliases:
+  供应商: supplier_name
+  供应商名称: supplier_name
+  名称: supplier_name
+  店名: supplier_name
+  户名: account_name
+  账户名: account_name
+  开户名: account_name
+  账号: account_no
+  卡号: account_no
+  银行账号: account_no
+  银行: bank_name
+  银行名称: bank_name
+  开户行: bank_name
+  开户支行: branch
+  支行: branch
+  联系方式: contact
+  电话: contact
+  手机: contact
+  微信: qrcode
+  WeChat: contact
+  wx: contact
+  微信号: contact
+  邮箱: contact
+  qq: contact
+  QQ: contact
+  Email: contact
+  email: contact
+  结算: settlement_type
+  结算类型: settlement_type
+  地域: region
+  地区: region
+  业务地区: region
+  类型: supplier_type
+  业务类型: supplier_type
+  扫码备注: scan_note
+  支付宝: qrcode
+  收款码: qrcode
+  二维码: qrcode
+dedupe:
+  enabled: true
+  match_field_key: supplier_name
+  on_hit: ask_overwrite
+attachment:
+  field_key: qrcode
+reply:
+  mode: text

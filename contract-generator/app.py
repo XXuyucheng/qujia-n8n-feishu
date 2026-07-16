@@ -31,6 +31,12 @@ from models import (
     ProbeRequest,
     ProbeResponse,
 )
+from sheet_filler import (
+    SheetConfigError,
+    build_sheet_value_ranges,
+    find_sheet_refs,
+    resolve_sheet_rows,
+)
 
 CONFIG_PATH = Path(os.getenv("CONTRACT_GENERATOR_CONFIG_PATH", "/app/config.yaml"))
 HOST = os.getenv("CONTRACT_GENERATOR_HOST", "0.0.0.0")
@@ -101,11 +107,14 @@ def api_probe(req: ProbeRequest) -> Any:
         blocks = client.list_all_blocks(token, req.template_token)
         hits, warnings = probe_placeholders(blocks)
         text_count = sum(1 for b in blocks if isinstance(b, dict) and b.get("text"))
+        sheet_refs = find_sheet_refs(blocks)
         return ProbeResponse(
             template_token=req.template_token,
             placeholders_found=[PlaceholderHit(**h) for h in hits],
             block_count=len(blocks),
             text_block_count=text_count,
+            sheet_block_count=len(sheet_refs),
+            sheet_tokens=[r["raw_token"] for r in sheet_refs],
             warnings=warnings,
         )
     except FeishuAPIError as exc:
@@ -216,10 +225,52 @@ def api_generate(req: GenerateRequest) -> Any:
         if update_requests:
             client.batch_update(token, document_id, update_requests)
 
+        sheet_rows_written = 0
+        warnings: List[str] = []
+
+        sheet_rows = resolve_sheet_rows(sheet_rows=req.sheet_rows, fields=req.fields)
+        if tpl.sheet and sheet_rows:
+            sheet_refs = find_sheet_refs(blocks)
+            if not sheet_refs:
+                return _error_response(
+                    error_code="SHEET_BLOCK_NOT_FOUND",
+                    message="模板配置了 sheet，但复制后的文档中未找到电子表格块(block_type=30)",
+                    details={"template_key": tpl.key},
+                )
+            # Use first sheet block (出团计划单约定仅一块预定结算表)
+            ref = sheet_refs[0]
+            try:
+                value_ranges = build_sheet_value_ranges(
+                    ref["sheet_id"],
+                    tpl.sheet,
+                    sheet_rows,
+                )
+            except SheetConfigError as exc:
+                return _error_response(
+                    error_code=exc.error_code,
+                    message=exc.message,
+                    details={"template_key": tpl.key},
+                )
+            if value_ranges:
+                client.values_batch_update(
+                    token,
+                    ref["spreadsheet_token"],
+                    value_ranges,
+                )
+                sheet_rows_written = min(
+                    len(sheet_rows),
+                    int(tpl.sheet.get("max_rows") or len(sheet_rows)),
+                )
+            if len(sheet_refs) > 1:
+                warnings.append(
+                    f"文档含 {len(sheet_refs)} 个 Sheet 块，仅写入第一个"
+                )
+        elif sheet_rows and not tpl.sheet:
+            warnings.append("请求含 sheet_rows/报价明细条目，但模板未配置 sheet，已跳过表格写入")
+
         # Re-check unresolved against original blocks with values applied conceptually:
         # keys still in original text that were not provided.
         unresolved = find_unresolved(blocks, values)
-        warnings: List[str] = []
         if unresolved and not (req.options and req.options.skip_unresolved_warnings):
             warnings.append(f"文档中仍有未提供值的占位符: {', '.join(unresolved)}")
 
@@ -231,9 +282,16 @@ def api_generate(req: GenerateRequest) -> Any:
             document_name=doc_name,
             template_token=tpl.template_token,
             replaced_blocks=len(update_requests),
+            sheet_rows_written=sheet_rows_written,
             unresolved_placeholders=unresolved,
             warnings=warnings,
             placeholders=values,
+        )
+    except SheetConfigError as exc:
+        return _error_response(
+            error_code=exc.error_code,
+            message=exc.message,
+            status_code=400,
         )
     except FeishuAPIError as exc:
         status = 502

@@ -158,5 +158,63 @@ class BuildPlaceholderValuesTests(unittest.TestCase):
         self.assertEqual(name2, "自定义名称")
 
 
+DEPARTURE_CONFIG = """
+defaults:
+  template_token: ""
+  folder_token: "fldDefault"
+  document_name_pattern: "文档-{订单号}"
+  required_placeholders:
+    - 甲方名称
+  rate_limit:
+    read_qps: 4.0
+    write_qps: 3.0
+
+templates:
+  出团计划单:
+    template_token: "doxcnDeparture"
+    folder_token: "fldDeparture"
+    document_name_pattern: "出团计划单-{订单号}"
+    required_placeholders:
+      - 订单编号
+      - 客户名称
+    placeholders:
+      订单编号: "{订单号}"
+      客户名称: "{单位}"
+      活动: "{活动名称}"
+    sheet:
+      start_row: 2
+      max_rows: 20
+      clear_unused_rows: true
+      columns:
+        - field: 名称
+          col: A
+        - field: 数量
+          col: C
+
+signing_unit_map:
+  出团计划单: 出团计划单
+"""
+
+
+class DepartureTemplateTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8")
+        self.tmp.write(DEPARTURE_CONFIG)
+        self.tmp.close()
+        self.config = load_config(Path(self.tmp.name))
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_resolve_sheet_and_required_override(self):
+        tpl = resolve_template(signing_unit="出团计划单", config=self.config)
+        self.assertEqual(tpl.template_token, "doxcnDeparture")
+        self.assertIsNotNone(tpl.sheet)
+        assert tpl.sheet is not None
+        self.assertEqual(tpl.sheet["max_rows"], 20)
+        self.assertEqual(tpl.required_placeholders, ["订单编号", "客户名称"])
+        self.assertNotIn("甲方名称", tpl.required_placeholders)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,12 +53,18 @@ services:
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
       - FEISHU_VERIFICATION_TOKEN=${FEISHU_VERIFICATION_TOKEN}
       - FEISHU_ENCRYPT_KEY=${FEISHU_ENCRYPT_KEY}
+      - FEISHU_CHAT_APP_ID=${FEISHU_CHAT_APP_ID}
+      - FEISHU_CHAT_APP_SECRET=${FEISHU_CHAT_APP_SECRET}
+      - FEISHU_CHAT_VERIFICATION_TOKEN=${FEISHU_CHAT_VERIFICATION_TOKEN:-}
+      - FEISHU_CHAT_ENCRYPT_KEY=${FEISHU_CHAT_ENCRYPT_KEY:-}
       - LISTENER_CONFIG_PATH=/app/config.yaml
       - LISTENER_DB_PATH=/data/events.sqlite
       - LISTENER_PORT=8010
       - LOG_LEVEL=INFO
       - ENABLE_DEBUG_ENDPOINTS=true
     restart: unless-stopped
+    depends_on:
+      - supplier-bot
 
   feishu-field-parser:
     build:
@@ -95,5 +101,32 @@ services:
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
       - FEISHU_CONTRACT_TEMPLATE_TOKEN=${FEISHU_CONTRACT_TEMPLATE_TOKEN:-}
       - FEISHU_CONTRACT_OUTPUT_FOLDER=${FEISHU_CONTRACT_OUTPUT_FOLDER:-}
+      - FEISHU_DEPARTURE_TEMPLATE_TOKEN=${FEISHU_DEPARTURE_TEMPLATE_TOKEN:-}
+      - FEISHU_DEPARTURE_OUTPUT_FOLDER=${FEISHU_DEPARTURE_OUTPUT_FOLDER:-}
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+  supplier-bot:
+    build:
+      context: ./supplier-bot
+      args:
+        BASE_IMAGE: ${SUPPLIER_BOT_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: supplier-bot
+    ports:
+      - "8040:8040"
+    volumes:
+      - ./supplier-bot/config:/app/config:ro
+      - ./supplier-bot/data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - SUPPLIER_BOT_CONFIG_DIR=/app/config
+      - SUPPLIER_BOT_DB_PATH=/data/sessions.sqlite
+      - SUPPLIER_BOT_PORT=8040
+      - FEISHU_CHAT_APP_ID=${FEISHU_CHAT_APP_ID}
+      - FEISHU_CHAT_APP_SECRET=${FEISHU_CHAT_APP_SECRET}
+      - FEISHU_BASE_ID=${FEISHU_BASE_ID}
+      - VISION_API_KEY=${VISION_API_KEY:-}
+      - VISION_API_URL=${VISION_API_URL:-https://ark.cn-beijing.volces.com/api/v3/responses}
+      - VISION_MODEL=${VISION_MODEL:-}
       - LOG_LEVEL=INFO
     restart: unless-stopped

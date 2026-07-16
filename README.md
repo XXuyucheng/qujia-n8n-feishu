@@ -16,7 +16,8 @@
 | --- | --- | --- | --- |
 | `n8n` | 工作流编排、凭据管理、Webhook 接收、定时任务执行 | 官方 Docker 镜像 `docker.n8n.io/n8nio/n8n:2.11.3` | `5678:5678` |
 | `pdf-parser` | PDF 发票文本与字段解析服务 | Python 3.12 + FastAPI + PyMuPDF | `8000:8000` |
-| `feishu-listener` | 飞书事件长连接监听、事件过滤、转发到 n8n Webhook | Python 3.12 + FastAPI + lark-oapi + SQLite | `8010:8010` |
+| `feishu-listener` | 飞书事件长连接（主应用 bitable + 对话应用 IM）、转发 Webhook | Python 3.12 + FastAPI + lark-oapi + SQLite | `8010:8010` |
+| `supplier-bot` | 供应商录入对话机器人（对话专用应用） | Python 3.12 + FastAPI | `8040:8040` |
 
 当前 Docker Compose 运行状态：
 

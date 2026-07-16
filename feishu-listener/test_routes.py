@@ -231,5 +231,91 @@ class MultiTableIdTests(unittest.TestCase):
         self.assertFalse(route_matches(route, self.edited_event))
 
 
+class AppIdAndImNormalizeTests(unittest.TestCase):
+    def test_app_id_route_match(self):
+        event = load_quote_edited_event()
+        route = base_route(app_id="cli_a94bb777f63a5bce")
+        self.assertTrue(route_matches(route, event))
+        route_bad = base_route(app_id="cli_other")
+        self.assertFalse(route_matches(route_bad, event))
+
+    def test_im_message_normalize(self):
+        raw = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "im-001",
+                "event_type": "im.message.receive_v1",
+                "app_id": "cli_a940966ee8385bd7",
+                "create_time": "1",
+            },
+            "event": {
+                "sender": {
+                    "sender_type": "user",
+                    "sender_id": {"open_id": "ou_test"},
+                },
+                "message": {
+                    "message_id": "om_test",
+                    "chat_id": "oc_test",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "content": '{"text":"添加供应商 测试店"}',
+                },
+            },
+        }
+        normalized = normalize_event(raw)
+        self.assertEqual(normalized["event_type"], "im.message.receive_v1")
+        self.assertEqual(normalized["app_id"], "cli_a940966ee8385bd7")
+        self.assertEqual(normalized["resource"]["open_id"], "ou_test")
+        self.assertEqual(normalized["resource"]["text"], "添加供应商 测试店")
+        self.assertEqual(normalized["resource"]["message_type"], "text")
+
+    def test_post_with_embedded_image_normalize(self):
+        post = {
+            "title": "",
+            "content": [
+                [
+                    {
+                        "tag": "text",
+                        "text": "录入二维码，结算类型改为月结",
+                        "style": [],
+                    }
+                ],
+                [
+                    {
+                        "tag": "img",
+                        "image_key": "img_v3_0213l_testkey",
+                        "width": 100,
+                        "height": 100,
+                    }
+                ],
+            ],
+        }
+        raw = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "im-post-001",
+                "event_type": "im.message.receive_v1",
+                "app_id": "cli_a940966ee8385bd7",
+            },
+            "event": {
+                "sender": {"sender_type": "user", "sender_id": {"open_id": "ou_x"}},
+                "message": {
+                    "message_id": "om_post",
+                    "chat_id": "oc_x",
+                    "chat_type": "p2p",
+                    "message_type": "post",
+                    "content": json.dumps(post, ensure_ascii=False),
+                },
+            },
+        }
+        normalized = normalize_event(raw)
+        self.assertEqual(normalized["resource"]["message_type"], "post")
+        self.assertIn("录入二维码", normalized["resource"]["text"])
+        self.assertEqual(normalized["resource"]["image_key"], "img_v3_0213l_testkey")
+        self.assertEqual(
+            normalized["resource"]["image_keys"], ["img_v3_0213l_testkey"]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

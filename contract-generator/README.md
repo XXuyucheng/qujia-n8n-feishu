@@ -1,6 +1,6 @@
 # Contract Generator
 
-飞书云文档合同生成服务（路径 B）：复制 docx 模板 → 遍历 Block → 替换 `{{占位符}}` → 返回新文档 URL。
+飞书云文档合同 / 出团计划单生成服务（路径 B）：复制 docx 模板 → 遍历 Block → 替换 `{{占位符}}` →（可选）写入内嵌电子表格 Sheet → 返回新文档 URL。
 
 供 n8n / curl 通过 Docker 内网调用。端口默认 `8030`。
 
@@ -8,6 +8,7 @@
 
 - [合同生成工作流.md](../合同生成工作流.md)（路径选型）
 - [合同生成-路径B实现.md](../合同生成-路径B实现.md)（实现规格）
+- [出团计划单模板.md](../出团计划单模板.md)（出团计划单占位符与 Sheet 列约定）
 
 ---
 
@@ -19,6 +20,7 @@
 2. `docx/v1/documents/{id}/blocks/{id}/children?with_descendants=true` — 拉取整棵块树
 3. 在每个含 `text.elements[].text_run` 的块里，用正则替换 `{{key}}`
 4. `docx/v1/documents/{id}/blocks/batch_update` — 分批写回（保留 `text_element_style`）
+5. （出团计划单）定位 `block_type=30` Sheet 块，拆分 `sheet.token` → `Sheets values_batch_update` 写入数量等列，**不覆盖小计/总价公式列**
 
 ```text
 curl / n8n
@@ -32,10 +34,11 @@ POST /api/generate
     ├─ FeishuClient.copy_file（全局锁 + 限流重试）
     ├─ list_all_blocks
     ├─ block_filler.build_update_requests
-    └─ batch_update（每批 ≤20，间隔 ≥350ms）
+    ├─ batch_update（每批 ≤20，间隔 ≥350ms）
+    └─ sheet_filler + values_batch_update（可选）
     │
     ▼
-{ document_url, replaced_blocks, unresolved_placeholders }
+{ document_url, replaced_blocks, sheet_rows_written, unresolved_placeholders }
 ```
 
 ```mermaid
@@ -167,6 +170,8 @@ curl http://localhost:8030/health
 | `FEISHU_APP_ID` / `FEISHU_APP_SECRET` | 未传 token 时自取凭证 |
 | `FEISHU_CONTRACT_TEMPLATE_TOKEN` | defaults 兜底模板 token |
 | `FEISHU_CONTRACT_OUTPUT_FOLDER` | defaults 兜底输出文件夹 |
+| `FEISHU_DEPARTURE_TEMPLATE_TOKEN` | 出团计划单模板 docx token |
+| `FEISHU_DEPARTURE_OUTPUT_FOLDER` | 出团计划单输出文件夹 token |
 | `CONTRACT_GENERATOR_CONFIG_PATH` | 默认 `/app/config.yaml` |
 
 修改 `config.yaml` 后无需重建镜像（已只读挂载），重启容器即可：
@@ -224,7 +229,7 @@ curl -s -X POST http://localhost:8030/api/generate/preview \
 
 准备清单：
 
-1. 应用权限：`docs:document:copy`、`docx:document`、`drive:drive`
+1. 应用权限：`docs:document:copy`、`docx:document`、`drive:drive`；出团计划单另需 `sheets:spreadsheet`（或等效 drive 编辑）
 2. 机器人加入模板文件夹（读）与输出文件夹（写）
 3. 创建 POC 模板，正文含 `{{甲方名称}}` 等（每个占位符同一 text_run）
 4. 记下 URL 中的 `template_token` 与文件夹 `folder_token`
@@ -255,6 +260,22 @@ export TEMPLATE_TOKEN=doxcnXXXXXXXX
 export FOLDER_TOKEN=fldcnXXXXXXXX
 ./scripts/smoke_generate.sh
 ```
+
+### 4b. 出团计划单（含内嵌 Sheet）
+
+1. 按 [出团计划单模板.md](../出团计划单模板.md) 建好飞书模板（文本 `{{}}` + 预定结算 Sheet，小计/总价用公式）
+2. `.env` 配置 `FEISHU_DEPARTURE_TEMPLATE_TOKEN` / `FEISHU_DEPARTURE_OUTPUT_FOLDER`
+3. 应用需额外开通电子表格编辑权限（`sheets:spreadsheet` 或 drive 编辑）
+4. 探测：`/api/probe` 应返回 `sheet_block_count >= 1`
+5. 冒烟：
+
+```bash
+export FEISHU_TOKEN=t-xxx
+./scripts/smoke_departure.sh          # dry_run preview
+RUN_LIVE=1 ./scripts/smoke_departure.sh
+```
+
+n8n 工作流：`出团计划单生成`（导出见 `files/departure-plan.workflow.json`），Webhook 路径 `make-departure-plan`。
 
 ### 5. 验收标准
 

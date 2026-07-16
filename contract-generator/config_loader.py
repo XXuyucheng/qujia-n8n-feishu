@@ -52,6 +52,7 @@ class ResolvedTemplate:
     placeholders: Dict[str, str] = field(default_factory=dict)
     required_placeholders: List[str] = field(default_factory=list)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    sheet: Optional[Dict[str, Any]] = None
     explicit: bool = False
 
 
@@ -191,6 +192,17 @@ def resolve_template(
             error_code="MISSING_FOLDER_TOKEN",
         )
 
+    tpl_required = tpl.get("required_placeholders")
+    if isinstance(tpl_required, list) and tpl_required:
+        required = [str(x) for x in tpl_required]
+
+    sheet_cfg = tpl.get("sheet")
+    if sheet_cfg is not None and not isinstance(sheet_cfg, dict):
+        raise TemplateResolveError(
+            f"sheet config must be a mapping for template key={template_key!r}",
+            error_code="INVALID_SHEET_CONFIG",
+        )
+
     return ResolvedTemplate(
         key=str(template_key),
         template_token=token,
@@ -204,6 +216,7 @@ def resolve_template(
         placeholders=dict(tpl.get("placeholders") or {}),
         required_placeholders=required,
         rate_limit=rate_limit,
+        sheet=dict(sheet_cfg) if isinstance(sheet_cfg, dict) else None,
         explicit=False,
     )
 

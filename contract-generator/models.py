@@ -13,7 +13,7 @@ class GenerateOptions(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    """Generate a contract from a Feishu docx template.
+    """Generate a contract / departure plan from a Feishu docx template.
 
     Two modes:
     1. Explicit: template_token + folder_token + placeholders
@@ -27,6 +27,7 @@ class GenerateRequest(BaseModel):
     template_token: Optional[str] = None
     folder_token: Optional[str] = None
     placeholders: Optional[Dict[str, str]] = None
+    sheet_rows: Optional[List[Dict[str, Any]]] = None
     options: GenerateOptions = Field(default_factory=GenerateOptions)
 
 
@@ -46,6 +47,8 @@ class ProbeResponse(BaseModel):
     placeholders_found: List[PlaceholderHit]
     block_count: int
     text_block_count: int
+    sheet_block_count: int = 0
+    sheet_tokens: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
 
@@ -57,6 +60,7 @@ class GenerateResponse(BaseModel):
     document_name: Optional[str] = None
     template_token: Optional[str] = None
     replaced_blocks: int = 0
+    sheet_rows_written: int = 0
     unresolved_placeholders: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     placeholders: Optional[Dict[str, str]] = None

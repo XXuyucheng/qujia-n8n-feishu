@@ -1,0 +1,29 @@
+# 全局应用配置（对话机器人平台）
+session_ttl_minutes: 5
+default_locale: zh-CN
+
+router:
+  strategy: trigger_first   # trigger_first | menu_only（llm_route 远期）
+  ambiguous_reply: |
+    请选择要办理的业务，或发送对应指令：
+    - 添加供应商 / /供应商
+
+ai:
+  enabled: true
+  extract_enabled: true
+  chat_enabled: false
+  route_enabled: false
+
+channels:
+  reply_mode: text          # text | card（卡片远期）
+
+# 全局默认口令（skill 未覆盖时使用）
+commands:
+  cancel: [取消, 算了, cancel]
+  confirm: [确认, 确定, 提交, yes, ok]
+  skip: [跳过, 无, skip]
+  overwrite: [覆盖, 更新]
+
+idle_help: |
+  发送「添加供应商」开始录入。也可发送 /供应商。
+  后续将支持更多业务技能（客户、线索等）。

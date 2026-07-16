@@ -38,6 +38,8 @@ app = FastAPI(title="Feishu Listener")
 state = {
     "started_at": datetime.now(timezone.utc).isoformat(),
     "ws_status": "not_started",
+    "chat_ws_status": "not_started",
+    "chat_ws_pid": None,
     "last_event_at": None,
     "last_error": None,
 }
@@ -821,11 +823,51 @@ def nested_get(data: Dict[str, Any], *path: str) -> Any:
     return cur
 
 
+def _extract_post_text_and_images(content_obj: Dict[str, Any]) -> Tuple[str, List[str]]:
+    """Parse Feishu post (rich text) content into plain text + image_key list."""
+    texts: List[str] = []
+    image_keys: List[str] = []
+    title = str(content_obj.get("title") or "").strip()
+    if title:
+        texts.append(title)
+    rows = content_obj.get("content")
+    if not isinstance(rows, list):
+        return "\n".join(texts), image_keys
+    for row in rows:
+        if not isinstance(row, list):
+            continue
+        line_parts: List[str] = []
+        for item in row:
+            if not isinstance(item, dict):
+                continue
+            tag = item.get("tag")
+            if tag == "text":
+                line_parts.append(str(item.get("text") or ""))
+            elif tag == "a":
+                line_parts.append(str(item.get("text") or item.get("href") or ""))
+            elif tag == "at":
+                line_parts.append(str(item.get("user_name") or ""))
+            elif tag == "img":
+                key = str(item.get("image_key") or "").strip()
+                if key:
+                    image_keys.append(key)
+            elif tag == "media":
+                key = str(item.get("file_key") or item.get("image_key") or "").strip()
+                if key:
+                    image_keys.append(key)
+        line = "".join(line_parts).strip()
+        if line:
+            texts.append(line)
+    return "\n".join(texts), image_keys
+
+
 def normalize_event(raw_input: Any) -> Dict[str, Any]:
     raw = as_dict(raw_input)
     header = raw.get("header") or {}
     event = raw.get("event") or {}
     message = event.get("message") or {}
+    sender = event.get("sender") or {}
+    sender_id = sender.get("sender_id") or {}
 
     event_type = (
         header.get("event_type")
@@ -862,14 +904,41 @@ def normalize_event(raw_input: Any) -> Dict[str, Any]:
         record_id = record_ids[0]
 
     text = ""
+    image_keys: List[str] = []
     content = message.get("content")
+    content_obj: Dict[str, Any] = {}
+    message_type = str(message.get("message_type") or "")
     if isinstance(content, str):
         try:
-            text = json.loads(content).get("text", "")
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                content_obj = parsed
+                text = str(parsed.get("text") or "")
+            else:
+                text = content
         except Exception:
             text = content
+    elif isinstance(content, dict):
+        content_obj = content
+        text = str(content.get("text") or "")
+
+    if content_obj.get("image_key"):
+        image_keys.append(str(content_obj["image_key"]))
+
+    if message_type == "post" or (
+        isinstance(content_obj.get("content"), list) and not text
+    ):
+        post_text, post_images = _extract_post_text_and_images(content_obj)
+        if post_text:
+            text = post_text
+        for key in post_images:
+            if key not in image_keys:
+                image_keys.append(key)
 
     command = text.strip().split()[0] if text.strip().startswith("/") else ""
+    mentions = message.get("mentions") or []
+    if not isinstance(mentions, list):
+        mentions = []
 
     return {
         "event_id": str(event_id),
@@ -885,7 +954,21 @@ def normalize_event(raw_input: Any) -> Dict[str, Any]:
             "record_id": str(record_id),
             "record_ids": record_ids,
             "chat_id": str(event.get("chat_id") or message.get("chat_id") or ""),
+            "chat_type": str(message.get("chat_type") or ""),
             "message_id": str(message.get("message_id") or ""),
+            "message_type": message_type,
+            "image_key": image_keys[0] if image_keys else "",
+            "image_keys": image_keys,
+            "open_id": str(
+                sender_id.get("open_id")
+                or sender.get("open_id")
+                or event.get("open_id")
+                or ""
+            ),
+            "sender_type": str(sender.get("sender_type") or ""),
+            "mentions": mentions,
+            "text": text,
+            "content": content_obj or content,
         },
         "command": command,
         "raw": raw,
@@ -1530,6 +1613,16 @@ def field_conditions_match(route: Dict[str, Any], event: Dict[str, Any]) -> bool
     return True
 
 
+def _value_matches(expected: Any, actual: Any) -> bool:
+    """Return True if actual matches expected (scalar or allowed-list)."""
+    if expected is None:
+        return True
+    if isinstance(expected, (list, tuple, set)):
+        allowed = {str(item) for item in expected}
+        return str(actual) in allowed
+    return str(expected) == str(actual)
+
+
 def route_matches(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
     if not route.get("enabled", True):
         return False
@@ -1537,6 +1630,7 @@ def route_matches(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
     resource = event.get("resource") or {}
     checks: List[Tuple[str, Any, Any]] = [
         ("event_type", route.get("event_type"), event.get("event_type")),
+        ("app_id", route.get("app_id"), event.get("app_id")),
         ("app_token", route.get("app_token"), resource.get("app_token") or resource.get("file_token")),
         ("file_token", route.get("file_token"), resource.get("file_token")),
         ("table_id", route.get("table_id"), resource.get("table_id")),
@@ -1713,6 +1807,28 @@ def build_lark_event_handler() -> Any:
     return builder.build()
 
 
+def build_chat_lark_event_handler() -> Any:
+    """Handler for the dedicated chat app: IM messages only."""
+    if lark is None:
+        raise RuntimeError("lark_oapi is not installed")
+
+    verification_token = os.getenv(
+        "FEISHU_CHAT_VERIFICATION_TOKEN",
+        os.getenv("FEISHU_VERIFICATION_TOKEN", ""),
+    )
+    encrypt_key = os.getenv(
+        "FEISHU_CHAT_ENCRYPT_KEY",
+        os.getenv("FEISHU_ENCRYPT_KEY", ""),
+    )
+
+    def handle_im_message(data: Any) -> None:
+        process_event(data)
+
+    builder = lark.EventDispatcherHandler.builder(verification_token, encrypt_key)
+    builder = builder.register_p2_im_message_receive_v1(handle_im_message)
+    return builder.build()
+
+
 def start_ws_client() -> None:
     if os.getenv("LISTENER_DISABLE_WS", "").lower() in {"1", "true", "yes"}:
         state["ws_status"] = "disabled"
@@ -1744,26 +1860,86 @@ def start_ws_client() -> None:
         logger.exception("websocket listener failed")
 
 
+_chat_ws_proc: Optional[Any] = None
+
+
+def start_chat_ws_client() -> None:
+    """Spawn chat-app WS in a child process (lark SDK cannot run two Clients in one process)."""
+    global _chat_ws_proc
+    if os.getenv("LISTENER_DISABLE_CHAT_WS", "").lower() in {"1", "true", "yes"}:
+        state["chat_ws_status"] = "disabled"
+        logger.info("chat websocket listener disabled by LISTENER_DISABLE_CHAT_WS")
+        return
+
+    app_id = os.getenv("FEISHU_CHAT_APP_ID", "")
+    app_secret = os.getenv("FEISHU_CHAT_APP_SECRET", "")
+    if not app_id or not app_secret:
+        state["chat_ws_status"] = "missing_credentials"
+        logger.warning(
+            "FEISHU_CHAT_APP_ID or FEISHU_CHAT_APP_SECRET is missing; chat websocket not started"
+        )
+        return
+
+    try:
+        import subprocess
+        import sys
+
+        script = Path(__file__).resolve().parent / "chat_ws.py"
+        state["chat_ws_status"] = "starting"
+        _chat_ws_proc = subprocess.Popen(
+            [sys.executable, str(script)],
+            env=os.environ.copy(),
+        )
+        state["chat_ws_status"] = "running"
+        state["chat_ws_pid"] = _chat_ws_proc.pid
+        logger.info(
+            "chat websocket subprocess started pid=%s app_id=%s",
+            _chat_ws_proc.pid,
+            app_id,
+        )
+    except Exception as exc:
+        state["chat_ws_status"] = "error"
+        state["last_error"] = str(exc)
+        logger.exception("chat websocket subprocess failed to start")
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     load_config()
     thread = threading.Thread(target=start_ws_client, name="feishu-ws", daemon=True)
     thread.start()
+    chat_thread = threading.Thread(
+        target=start_chat_ws_client, name="feishu-chat-ws-launcher", daemon=True
+    )
+    chat_thread.start()
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    chat_status = state["chat_ws_status"]
+    pid = state.get("chat_ws_pid")
+    if _chat_ws_proc is not None and _chat_ws_proc.poll() is not None:
+        chat_status = "exited"
+        state["chat_ws_status"] = chat_status
     return {
         "ok": store.is_writable(),
         "service": "feishu-listener",
         "started_at": state["started_at"],
         "ws_status": state["ws_status"],
+        "chat_ws_status": chat_status,
+        "chat_ws_pid": pid,
         "last_event_at": state["last_event_at"],
         "last_error": state["last_error"],
         "db_path": str(DB_PATH),
         "last_cleanup_at": cleanup_state["last_cleanup_at"],
         "last_cleanup_result": cleanup_state["last_cleanup_result"],
     }
+
+
+@app.post("/internal/ingest")
+def internal_ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Receive events from chat_ws subprocess (same host)."""
+    return process_event(payload)
 
 
 @app.get("/routes")

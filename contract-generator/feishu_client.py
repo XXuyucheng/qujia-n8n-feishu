@@ -272,3 +272,36 @@ class FeishuClient:
             self._raise_for_code(data, action="batch_update")
             if i + batch_size < len(requests) and delay > 0:
                 time.sleep(delay)
+
+    def values_batch_update(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        value_ranges: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Write multiple ranges into an embedded / standalone spreadsheet."""
+        if not value_ranges:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/values_batch_update"
+        )
+        self._throttle("write")
+        resp = self._client.post(
+            url,
+            headers=self._headers(token),
+            json={"valueRanges": value_ranges},
+        )
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.post(
+                url,
+                headers=self._headers(token),
+                json={"valueRanges": value_ranges},
+            )
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="values_batch_update")
+        return data.get("data") or {}

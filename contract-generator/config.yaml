@@ -46,6 +46,47 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       甲方电话: "{联系方式}"
       策划师: "{策划师}"
 
+  出团计划单:
+    template_token: "BEQndWqYsoXzaSxGrf3c4srLngg"
+    folder_token: "IBTBfdFszl5hujdAp1GcrRAAnfc"
+    document_name_pattern: "出团计划单-{订单号}"
+    required_placeholders:
+      - 订单编号
+      - 客户名称
+      - 执行时间
+      - 活动
+    placeholders:
+      订单编号: "{订单号}"
+      客户对接人: "{客户对接人}"
+      执行时间: "{执行日期}"
+      工作人员: "{工作人员}"
+      客户名称: "{单位}"
+      人数: "{执行人数}"
+      车型: "{车型}"
+      活动: "{活动名称}"
+      教练: "{教练}"
+      行程内容: "{行程内容}"
+      活动项目: "{活动项目}"
+      策划师: "{策划师}"
+    sheet:
+      start_row: 2
+      max_rows: 20
+      clear_unused_rows: true
+      columns:
+        - field: 名称
+          col: A
+        - field: 内容
+          col: B
+        - field: 数量
+          col: C
+        - field: 单价
+          col: D
+        - field: 结算方式
+          col: F
+        - field: 联系人
+          col: G
+      # E 列为小计公式、总价行不写，保留模板 SUM
+
 signing_unit_map:
   杭州趣加旅行社服务有限公司: 趣加旅社
   杭州趣加文化创意有限公司: 趣加文化创意
@@ -53,4 +94,4 @@ signing_unit_map:
   旅苑国际旅行社有限公司第一分公司: 旅苑
   杭州趣加体育活动策划有限公司: 趣加体育文化
   杭州趣加企业管理咨询有限公司: 趣加管理咨询
-  
+  出团计划单: 出团计划单

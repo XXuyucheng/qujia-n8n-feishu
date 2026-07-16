@@ -1,0 +1,463 @@
+{
+  "id": "KELX69kBerHLeSnW",
+  "name": "出团计划单生成",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        80
+      ],
+      "id": "d5452764-9454-4eea-834a-692ebf3fb148",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        80
+      ],
+      "id": "efdc4ebe-e759-4fe7-8dbe-81e486c7dd05",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl821KbTBpjjyXI/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"filter\": {\"conjunction\": \"or\", \"conditions\": [{\"field_name\": \"执行单生成状态\", \"operator\": \"is\", \"value\": [\"待生成\"]}, {\"field_name\": \"执行单生成状态\", \"operator\": \"is\", \"value\": [\"需重试\"]}]}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        480,
+        80
+      ],
+      "id": "659ca9a1-e71f-4f8a-ad89-efb3fe9de6f4",
+      "name": "查询待识别执行记录"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl91gZyDPCLhlva/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filter\": {\n    \"conjunction\": \"and\",\n    \"conditions\": [\n      {\n        \"field_name\": \"记录 ID\",\n        \"operator\": \"is\",\n        \"value\": [\"{{ $json.fields[\"关联订单\"].link_record_ids[0] }}\"]\n      }\n    ]\n  }\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1168,
+        96
+      ],
+      "id": "9694e6c2-9ef4-4ad1-b28b-91a1c518a79e",
+      "name": "查询待识报价附件"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.data.items[0].fields[\"报价单\"][0].tmp_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1376,
+        96
+      ],
+      "id": "f8ef4ad4-7ac6-449a-8296-8e65b7509ce8",
+      "name": "获取临时下载链接"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        1792,
+        96
+      ],
+      "id": "b1d812d0-759f-48af-8e25-91f96a496996",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.data.tmp_download_urls[0].tmp_download_url}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1584,
+        96
+      ],
+      "id": "31827594-d972-4285-9623-7a0638ce8e1d",
+      "name": "下载文件"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        928,
+        80
+      ],
+      "id": "e8f3739c-4f73-4099-9bc7-350a654fe296",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 上游：Extract from File1 的全部行\nconst rows = $input.all().map((i) => i.json);\n\nfunction cell(row, key) {\n  const v = row?.[key];\n  if (v == null || v === '') return '';\n  return String(v).trim();\n}\n\nfunction excelTime(v) {\n  if (typeof v === 'number' && v > 0 && v < 1) {\n    const mins = Math.round(v * 24 * 60);\n    const h = String(Math.floor(mins / 60)).padStart(2, '0');\n    const m = String(mins % 60).padStart(2, '0');\n    return `${h}:${m}`;\n  }\n  return v == null || v === '' ? '' : String(v).trim();\n}\n\nfunction num(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction stripCategory(raw) {\n  return String(raw || '')\n    .replace(/^\\d+\\s*[.、．]\\s*/, '')\n    .trim();\n}\n\nfunction fmtMoney(n) {\n  if (!Number.isFinite(n)) return '';\n  return Number.isInteger(n) ? String(n) : n.toFixed(2);\n}\n\n// —— 固定区：index 1~5 ——\n// 0=表头，1=活动名称，2=人数，3=活动天数，4=执行日期，5=出发地目的地\nconst 活动名称 = cell(rows[1], '__EMPTY_1');\nconst 人数 = num(rows[2]?.['__EMPTY_1']) ?? cell(rows[2], '__EMPTY_1');\nconst 活动天数 = cell(rows[3], '__EMPTY_1');\nconst 执行日期 = cell(rows[4], '__EMPTY_1');\nconst od = cell(rows[5], '__EMPTY_1');\nconst [出发地, 目的地] = od.split(/[-—–～~]/).map((s) => s.trim());\n\n// —— 定位「活动总价」行 ——\nconst totalIdx = rows.findIndex((r, i) => {\n  if (i <= 5) return false;\n  const a = cell(r, 'QUJIA趣加团建');\n  return a.includes('活动总价');\n});\nif (totalIdx < 0) {\n  throw new Error('未找到含「活动总价」的行');\n}\n\nconst totalRow = rows[totalIdx];\nconst 活动总价 =\n  num(totalRow['__EMPTY_2']) ??\n  num(totalRow['__EMPTY_1']) ??\n  num(totalRow['__EMPTY_4']);\n\n// —— 明细区：6 ~ totalIdx-1（跳过表头「物品名称」行）——\nconst feeLines = [];\nconst feeObjects = [];\nlet category = '';\n\nfor (let i = 6; i < totalIdx; i++) {\n  const r = rows[i];\n  const a = cell(r, 'QUJIA趣加团建');\n  const name = cell(r, '__EMPTY');\n  // 去掉表格里的换行，并压缩多余空白\n  const desc = cell(r, '__EMPTY_1')\n    .replace(/[\\r\\n]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n  const qty = r['__EMPTY_2'];\n  const price = r['__EMPTY_3'];\n  const total = r['__EMPTY_4'];\n\n  if (a && /^\\d+\\s*[.、．]/.test(a)) {\n    category = stripCategory(a);\n  }\n\n  // 跳过列头 / 空行 / 零金额行\n  if (name === '物品名称' || desc === '描述') continue;\n  if (!name && !desc) continue;\n\n  const qtyN = num(qty);\n  const priceN = num(price);\n  const totalN = num(total);\n  if (totalN === 0) continue;\n\n  const itemName = name || '(未命名)';\n  const calc =\n    qtyN != null && priceN != null\n      ? `${fmtMoney(qtyN)}*${fmtMoney(priceN)}=${fmtMoney(totalN ?? qtyN * priceN)}`\n      : totalN != null\n        ? fmtMoney(totalN)\n        : '';\n\n  // 交通： 大巴车（55座）\t1*4800=4800\t\t描述\n  const md = `${category || '费用'}： ${itemName}\\t${calc}\\t\\t${desc}`;\n  feeLines.push(md);\n  feeObjects.push({\n    分类: category || '费用',\n    名称: itemName,\n    描述: desc,\n    数量: qtyN,\n    单价: priceN,\n    总价: totalN,\n    markdown: md,\n  });\n}\n\n// —— 行程区：totalIdx 之后 ——\nconst tripLines = [];\nconst tripObjects = [];\nlet day = '';\n\nfor (let i = totalIdx + 1; i < rows.length; i++) {\n  const r = rows[i];\n  const a = cell(r, 'QUJIA趣加团建');\n  const b = r['__EMPTY'];\n  const c = cell(r, '__EMPTY_1');\n\n  if (a === '活动行程') continue;\n  if (a === '日期' && cell(r, '__EMPTY') === '时间') continue;\n\n  if (/^D\\d+$/i.test(a)) {\n    day = a.toLowerCase().replace(/^d/, 'day');\n  }\n\n  const time = excelTime(b);\n  const content = c;\n  if (!content || content === '内容') continue;\n\n  // day1\t\t10:00-12:00\t前往景区\n  const md = `${day || '行程'}\\t${time}\\t${content}`;\n  tripLines.push(md);\n  tripObjects.push({ day: day || '', 时间: time, 内容: content, markdown: md });\n}\n\n// 按「名称 → … → 行程」输出为一个对象数组（下游也可直接取扁平字段）\nconst extracted = [\n  { key: '活动名称', value: 活动名称 },\n  { key: '人数', value: 人数 },\n  { key: '活动天数', value: 活动天数 },\n  { key: '执行日期', value: 执行日期 },\n  { key: '出发地目的地', value: od, 出发地: 出发地 || '', 目的地: 目的地 || '' },\n  { key: '活动总价', value: 活动总价 },\n  { key: '报价明细', value: feeLines.join('\\n'), items: feeObjects },\n  { key: '活动行程', value: tripLines.join('\\n'), items: tripObjects },\n];\n\nreturn [\n  {\n    json: {\n      活动名称,\n      人数,\n      活动天数,\n      执行日期_报价单: 执行日期,\n      出发地: 出发地 || '',\n      目的地: 目的地 || '',\n      出发地目的地: od,\n      活动总价,\n      报价明细: feeLines.join('\\n'),\n      活动行程: tripLines.join('\\n'),\n      报价明细条目: feeObjects,\n      活动行程条目: tripObjects,\n      extracted, // 名称→行程 的对象数组\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        96
+      ],
+      "id": "f91a392d-2265-4e79-a168-9cf399e90a66",
+      "name": "报价信息提取"
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $json.data?.items || [];\nreturn records.map((record) => ({ json: record }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        80
+      ],
+      "id": "62ea17b6-c2ea-4e8e-8dfc-e590ce145925",
+      "name": "拆分item"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "make-departure-plan",
+        "options": {}
+      },
+      "id": "f50cda7a-93ee-4e35-9639-11ec37c3b635",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1024,
+        80
+      ],
+      "webhookId": "f29a427d-99d2-4d89-95d5-9d12a7962295"
+    },
+    {
+      "parameters": {
+        "jsCode": "const quote = $input.first().json;\nconst loopItem = $('Loop Over Items').item.json;\nconst execFields = loopItem.fields || {};\nconst quoteResp = $('查询待识报价附件').item.json;\nconst quoteFields = quoteResp?.data?.items?.[0]?.fields || {};\nconst orderRecordId = quoteResp?.data?.items?.[0]?.record_id || '';\nconst execRecordId = loopItem.record_id || '';\nconst token = $('获取飞书Token').first().json.tenant_access_token || '';\n\nfunction textOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v).trim();\n  if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join('；');\n  if (typeof v === 'object') {\n    if (Array.isArray(v.value)) return textOf(v.value);\n    if (v.text != null) return String(v.text).trim();\n    if (v.name != null) return String(v.name).trim();\n  }\n  return '';\n}\n\nfunction dateOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10).replace(/-/g, '/');\n  if (typeof v === 'object' && Array.isArray(v.value) && typeof v.value[0] === 'number') {\n    return new Date(v.value[0]).toISOString().slice(0, 10).replace(/-/g, '/');\n  }\n  return textOf(v).replace(/-/g, '/');\n}\n\nconst customerRaw = textOf(execFields['客户信息']);\nconst parts = customerRaw.split(/[；;]/).map((s) => s.trim()).filter(Boolean);\nconst 单位 = parts[0] || textOf(quoteFields['单位']);\nconst 联系人 = parts[1] || textOf(quoteFields['联系人']);\nconst 联系方式 = parts[2] || textOf(quoteFields['联系方式']);\n\nconst sheet_rows = (quote.报价明细条目 || []).map((item) => ({\n  名称: item.名称 || '',\n  描述: item.描述 || '',\n  数量: item.数量,\n  单价: item.单价,\n  结算方式: item.结算方式 || '',\n  联系人: item.联系人 || '',\n}));\n\nreturn [\n  {\n    json: {\n      tenant_access_token: token,\n      signing_unit: '出团计划单',\n      fields: {\n        订单号: textOf(quoteFields['订单号']),\n        单位,\n        联系人,\n        联系方式,\n        客户领队: '',\n        导游: '',\n        车型: '',\n        车牌: '',\n        司机: '',\n        教练: '',\n        物料: '',\n        策划师: textOf(execFields['策划']) || textOf(quoteFields['策划师']),\n        执行日期:\n          dateOf(quoteFields['执行日期']) ||\n          dateOf(execFields['执行日期']) ||\n          quote.执行日期_报价单 ||\n          '',\n        执行人数: quote.人数 || textOf(quoteFields['执行人数']),\n        活动名称: quote.活动名称 || '',\n        活动行程: quote.活动行程 || '',\n        报价明细条目: quote.报价明细条目 || [],\n        执行编号: textOf(execFields['执行编号']),\n        执行记录_id: execRecordId,\n        订单记录_id: orderRecordId,\n      },\n      sheet_rows,\n    },\n  },\n];\n"
+      },
+      "id": "4db7f398-f4bf-4070-8c00-7130dde33a51",
+      "name": "出团信息聚合",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2220,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://contract-generator:8030/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "4f771dc6-f7b9-4975-9ea3-a615e641d691",
+      "name": "生成出团计划单",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2440,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const gen = $input.first().json;\nconst loopItem = $('Loop Over Items').item.json;\nconst recordId = loopItem.record_id || '';\nconst orderId = $('出团信息聚合').first().json?.fields?.订单记录_id || '';\n\nif (!gen.success) {\n  return [{\n    json: {\n      fields: {\n        执行单生成状态: '生成失败',\n      },\n      _meta: {\n        record_id: recordId,\n        order_record_id: orderId,\n        error: gen.message || gen.error_code || 'generate failed',\n      },\n    },\n  }];\n}\n\n// 执行表状态回写；文档 URL 留在 _meta，便于执行日志查看。\n// 若已在执行表新增超链接字段「出团计划」，可取消下方注释。\nconst fields = {\n  执行单生成状态: '已生成',\n};\n// fields['出团计划'] = { text: gen.document_name || '出团计划单', link: gen.document_url };\n\nreturn [{\n  json: {\n    fields,\n    _meta: {\n      record_id: recordId,\n      order_record_id: orderId,\n      document_url: gen.document_url,\n      sheet_rows_written: gen.sheet_rows_written || 0,\n    },\n  },\n}];\n"
+      },
+      "id": "1601e57b-5183-4af0-909d-596352de0805",
+      "name": "出团回写处理",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $json._meta.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: $json.fields }) }}",
+        "options": {}
+      },
+      "id": "f6e22684-5eb1-42d9-952b-34211057a5ec",
+      "name": "回写出团结果",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2880,
+        96
+      ]
+    }
+  ],
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "查询待识别执行记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询待识别执行记录": {
+      "main": [
+        [
+          {
+            "node": "拆分item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "拆分item": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [
+          {
+            "node": "查询待识报价附件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询待识报价附件": {
+      "main": [
+        [
+          {
+            "node": "获取临时下载链接",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取临时下载链接": {
+      "main": [
+        [
+          {
+            "node": "下载文件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载文件": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "报价信息提取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "报价信息提取": {
+      "main": [
+        [
+          {
+            "node": "出团信息聚合",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "出团信息聚合": {
+      "main": [
+        [
+          {
+            "node": "生成出团计划单",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成出团计划单": {
+      "main": [
+        [
+          {
+            "node": "出团回写处理",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "出团回写处理": {
+      "main": [
+        [
+          {
+            "node": "回写出团结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "回写出团结果": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  }
+}
