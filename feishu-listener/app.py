@@ -823,16 +823,19 @@ def nested_get(data: Dict[str, Any], *path: str) -> Any:
     return cur
 
 
-def _extract_post_text_and_images(content_obj: Dict[str, Any]) -> Tuple[str, List[str]]:
-    """Parse Feishu post (rich text) content into plain text + image_key list."""
+def _extract_post_text_and_media(
+    content_obj: Dict[str, Any],
+) -> Tuple[str, List[str], List[str]]:
+    """Parse Feishu post (rich text) into plain text, image_keys, and file_keys."""
     texts: List[str] = []
     image_keys: List[str] = []
+    file_keys: List[str] = []
     title = str(content_obj.get("title") or "").strip()
     if title:
         texts.append(title)
     rows = content_obj.get("content")
     if not isinstance(rows, list):
-        return "\n".join(texts), image_keys
+        return "\n".join(texts), image_keys, file_keys
     for row in rows:
         if not isinstance(row, list):
             continue
@@ -849,16 +852,30 @@ def _extract_post_text_and_images(content_obj: Dict[str, Any]) -> Tuple[str, Lis
                 line_parts.append(str(item.get("user_name") or ""))
             elif tag == "img":
                 key = str(item.get("image_key") or "").strip()
-                if key:
+                if key and key not in image_keys:
                     image_keys.append(key)
+            elif tag == "file":
+                key = str(item.get("file_key") or "").strip()
+                if key and key not in file_keys:
+                    file_keys.append(key)
             elif tag == "media":
-                key = str(item.get("file_key") or item.get("image_key") or "").strip()
-                if key:
-                    image_keys.append(key)
+                file_key = str(item.get("file_key") or "").strip()
+                image_key = str(item.get("image_key") or "").strip()
+                if file_key:
+                    if file_key not in file_keys:
+                        file_keys.append(file_key)
+                elif image_key and image_key not in image_keys:
+                    image_keys.append(image_key)
         line = "".join(line_parts).strip()
         if line:
             texts.append(line)
-    return "\n".join(texts), image_keys
+    return "\n".join(texts), image_keys, file_keys
+
+
+def _extract_post_text_and_images(content_obj: Dict[str, Any]) -> Tuple[str, List[str]]:
+    """Backward-compatible wrapper: plain text + image_key list."""
+    text, image_keys, _file_keys = _extract_post_text_and_media(content_obj)
+    return text, image_keys
 
 
 def normalize_event(raw_input: Any) -> Dict[str, Any]:
@@ -905,6 +922,7 @@ def normalize_event(raw_input: Any) -> Dict[str, Any]:
 
     text = ""
     image_keys: List[str] = []
+    file_keys: List[str] = []
     content = message.get("content")
     content_obj: Dict[str, Any] = {}
     message_type = str(message.get("message_type") or "")
@@ -925,15 +943,28 @@ def normalize_event(raw_input: Any) -> Dict[str, Any]:
     if content_obj.get("image_key"):
         image_keys.append(str(content_obj["image_key"]))
 
+    if message_type == "file":
+        key = str(content_obj.get("file_key") or "").strip()
+        if key and key not in file_keys:
+            file_keys.append(key)
+
     if message_type == "post" or (
         isinstance(content_obj.get("content"), list) and not text
     ):
-        post_text, post_images = _extract_post_text_and_images(content_obj)
+        post_text, post_images, post_files = _extract_post_text_and_media(content_obj)
         if post_text:
             text = post_text
         for key in post_images:
             if key not in image_keys:
                 image_keys.append(key)
+        for key in post_files:
+            if key not in file_keys:
+                file_keys.append(key)
+
+    # Some clients put file_key on top-level content without message_type=file
+    top_file_key = str(content_obj.get("file_key") or "").strip()
+    if top_file_key and top_file_key not in file_keys and message_type != "image":
+        file_keys.append(top_file_key)
 
     command = text.strip().split()[0] if text.strip().startswith("/") else ""
     mentions = message.get("mentions") or []
@@ -959,6 +990,8 @@ def normalize_event(raw_input: Any) -> Dict[str, Any]:
             "message_type": message_type,
             "image_key": image_keys[0] if image_keys else "",
             "image_keys": image_keys,
+            "file_key": file_keys[0] if file_keys else "",
+            "file_keys": file_keys,
             "open_id": str(
                 sender_id.get("open_id")
                 or sender.get("open_id")
@@ -1648,6 +1681,13 @@ def route_matches(route: Dict[str, Any], event: Dict[str, Any]) -> bool:
         else:
             if str(expected) != str(actual):
                 return False
+
+    text_contains = route.get("text_contains")
+    if text_contains is not None and str(text_contains) != "":
+        haystack = str(resource.get("text") or "")
+        if str(text_contains) not in haystack:
+            return False
+
     if not actions_match(route, event):
         return False
     return field_conditions_match(route, event)

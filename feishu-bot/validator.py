@@ -105,27 +105,74 @@ def suggested_missing(fields_cfg: Dict[str, Any], data: Dict[str, Any]) -> List[
     return missing
 
 
-def resolve_select_fields(
-    fields_cfg: Dict[str, Any], data: Dict[str, Any]
+def _option_missing_msg(config: Dict[str, Any], label: str, value: str) -> str:
+    prompts = (config or {}).get("prompts") or {}
+    template = str(
+        prompts.get("option_missing")
+        or "「{label}」选项「{value}」不存在，请核对或联系管理员。"
+    )
+    try:
+        return template.format(label=label, value=value)
+    except (KeyError, ValueError):
+        return f"「{label}」选项「{value}」不存在，请核对或联系管理员。"
+
+
+def apply_field_patterns(
+    fields_cfg: Dict[str, Any],
+    data: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], List[str]]:
-    """Normalize select values; return (data, unresolved_messages)."""
+    """Validate pattern constraints (e.g. digits). Invalid values are dropped."""
     out = dict(data)
     problems: List[str] = []
+    prompts = (config or {}).get("prompts") or {}
+    for key, cfg in fields_cfg.items():
+        if key not in out or out[key] in (None, "", []):
+            continue
+        pattern = cfg.get("pattern")
+        if not pattern:
+            continue
+        raw = out[key]
+        if pattern == "digits":
+            cleaned = normalize_account_no(str(raw))
+            if not cleaned or not re.fullmatch(r"\d+", cleaned):
+                label = cfg.get("name", key)
+                template = str(
+                    prompts.get("account_invalid")
+                    or "{label}必须为纯数字，当前值「{value}」无效。"
+                )
+                try:
+                    problems.append(template.format(label=label, value=raw))
+                except (KeyError, ValueError):
+                    problems.append(f"{label}必须为纯数字，当前值「{raw}」无效。")
+                del out[key]
+            else:
+                out[key] = cleaned
+    return out, problems
+
+
+def resolve_select_fields(
+    fields_cfg: Dict[str, Any],
+    data: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Normalize select values; unmatched options become hard errors (value dropped)."""
+    out = dict(data)
+    problems: List[str] = []
+    cfg_root = config or {}
     for key, cfg in fields_cfg.items():
         ftype = cfg.get("type")
         options = cfg.get("options") or []
         if key not in out or not out[key] or not options:
             continue
         if ftype == "single_select":
-            matched = fuzzy_match_option(str(out[key]), options)
+            raw_val = str(out[key])
+            matched = fuzzy_match_option(raw_val, options)
             if matched:
                 out[key] = matched
             else:
-                sample = "、".join(options[:8])
                 label = cfg.get("name", key)
-                problems.append(
-                    f"{label}无法匹配「{out[key]}」，可选如：{sample}…"
-                )
+                problems.append(_option_missing_msg(cfg_root, label, raw_val))
                 del out[key]
         elif ftype == "multi_select":
             raw = out[key]
@@ -140,9 +187,7 @@ def resolve_select_fields(
                     resolved.append(matched)
                 else:
                     label = cfg.get("name", key)
-                    problems.append(
-                        f"{label}中的「{part}」无法匹配，可选：{'、'.join(options)}"
-                    )
+                    problems.append(_option_missing_msg(cfg_root, label, part))
             if resolved:
                 out[key] = resolved
             else:
@@ -176,3 +221,11 @@ def build_bitable_fields(fields_cfg: Dict[str, Any], data: Dict[str, Any]) -> Di
         else:
             result[name] = val
     return result
+
+
+def can_overwrite(config: Dict[str, Any], open_id: str) -> bool:
+    perms = config.get("permissions") or {}
+    allowed = perms.get("overwrite_open_ids") or []
+    if not allowed:
+        return False
+    return str(open_id or "") in {str(x) for x in allowed}

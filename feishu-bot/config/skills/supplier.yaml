@@ -1,5 +1,5 @@
 # Skill: 供应商录入（Phase 1）
-# 改完重启 supplier-bot 即可，一般无需改代码。
+# 改完重启 feishu-bot 即可，一般无需改代码。
 
 id: supplier
 name: 供应商录入
@@ -8,6 +8,7 @@ enabled: true
 triggers:
 - 添加供应商
 - 录入供应商
+- 供应商录入
 - /supplier
 - /供应商
 prompts:
@@ -33,7 +34,14 @@ prompts:
   cancel_overwrite: 已取消，未覆盖已有记录。
   image_before_start: 请先发送「添加供应商」并填写基本信息，再发送收款码图片。
   group_hint: 支付信息（户名+账号+银行名称，或发送收款码图片）
-  dedupe_ask: 已存在同名「{name}」。回复「覆盖」更新该记录，或「取消」。
+  dedupe_ask: '{detail}
+
+    回复「覆盖」更新已有记录，或「取消」。'
+  dedupe_denied: '{detail}
+
+    你没有覆盖权限，请修改后重新提交，或联系管理员。'
+  option_missing: '「{label}」选项「{value}」不存在，请核对或联系管理员。'
+  account_invalid: '账号必须为纯数字（可含空格，将自动去除），当前值「{value}」无效。'
   success: '{action}供应商「{name}」成功。记录 ID：{record_id}'
 commands:
   cancel:
@@ -71,6 +79,7 @@ fields:
     name: 账号
     field_id: fld1A1tbxM
     type: text
+    pattern: digits
   bank_name:
     name: 银行名称
     field_id: fld0iMXODu
@@ -180,6 +189,7 @@ fields:
     - 车队
     - 景区（基地）
     - 餐厅
+    - 客户退款
   scan_note:
     name: 扫码备注
     field_id: fldmdR8OD3
@@ -232,10 +242,27 @@ aliases:
   支付宝: qrcode
   收款码: qrcode
   二维码: qrcode
+rules:
+- id: customer_refund
+  keywords:
+  - 客户退款
+  - 客户退回
+  - 退款给客户
+  set_fields:
+    supplier_type: 客户退款
+  require_name_pattern: 客户退款\d{6,}
+  hint: 检测到客户退款场景：请将供应商名称改为「客户退款+订单号」，例如客户退款26071001；类型已自动设为客户退款。
 dedupe:
   enabled: true
-  match_field_key: supplier_name
+  fields:
+  - key: supplier_name
+  - key: account_name
+  - key: account_no
   on_hit: ask_overwrite
+  on_hit_denied: reject
+ai:
+  extract_on_incomplete: true
+  long_text_chars: 40
 attachment:
   field_key: qrcode
 reply:

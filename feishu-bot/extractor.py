@@ -12,7 +12,7 @@ import httpx
 
 from validator import normalize_account_no
 
-logger = logging.getLogger("supplier-bot.extractor")
+logger = logging.getLogger("feishu-bot.extractor")
 
 LABEL_LINE = re.compile(
     r"^(?P<label>[\u4e00-\u9fffA-Za-z/]{1,12})\s*[:：]\s*(?P<value>.+)$"
@@ -205,11 +205,27 @@ def extract_fields(
     ruled = extract_by_rules(text, config)
     if not use_llm:
         return ruled
-    # If we already have supplier_name + some payment fields, skip LLM
-    if ruled.get("supplier_name") and (
+
+    ai_cfg = config.get("ai") or {}
+    extract_on_incomplete = bool(ai_cfg.get("extract_on_incomplete", True))
+    long_chars = int(ai_cfg.get("long_text_chars") or 40)
+
+    fields_cfg = config.get("fields") or {}
+    from validator import missing_required, payment_satisfied
+
+    incomplete = bool(missing_required(fields_cfg, ruled)) or not payment_satisfied(
+        config, ruled
+    )
+    long_text = len((text or "").strip()) > long_chars
+    already_rich = ruled.get("supplier_name") and (
         (ruled.get("account_no") and ruled.get("bank_name")) or len(ruled) >= 4
-    ):
+    )
+
+    if already_rich and not (extract_on_incomplete and incomplete) and not long_text:
         return ruled
+    if not extract_on_incomplete and already_rich:
+        return ruled
+
     llm = extract_by_llm(text, config)
     merged = dict(llm)
     merged.update(ruled)  # rules win on conflicts

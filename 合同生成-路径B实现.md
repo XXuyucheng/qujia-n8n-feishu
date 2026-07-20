@@ -1,6 +1,6 @@
 # 合同生成 — 路径 B 实现与实验验证文档
 
-状态：`实验验证阶段（待开发 contract-generator 服务）`
+状态：`实验验证阶段（待开发 feishu-files-generation 服务）`
 
 上级文档：[合同生成工作流.md](./合同生成工作流.md)（技术路径选型）
 
@@ -8,7 +8,7 @@
 
 ## 一、文档定位
 
-本文档是 **路径 B（contract-generator 服务 + 飞书 Block API）** 的落地实现说明，面向「先跑通实验验证、再接入 n8n 生产工作流」的开发顺序。
+本文档是 **路径 B（feishu-files-generation 服务 + 飞书 Block API）** 的落地实现说明，面向「先跑通实验验证、再接入 n8n 生产工作流」的开发顺序。
 
 | 阶段 | 目标 | 本文档覆盖 |
 | --- | --- | --- |
@@ -36,7 +36,7 @@ flowchart TB
     fp["feishu-field-parser :8020"]
   end
 
-  subgraph new_svc["新增服务 contract-generator :8030"]
+  subgraph new_svc["新增服务 feishu-files-generation :8030"]
     api["FastAPI /api/generate"]
     cfg["config.yaml 模板映射"]
     feishu["FeishuClient\n限速 + 重试"]
@@ -64,13 +64,13 @@ flowchart TB
 ### 2.1 设计原则
 
 1. **与现有栈一致**：Python 3.12 + FastAPI + uvicorn + Docker Compose，模式同 `pdf-parser`、`feishu-field-parser`。
-2. **n8n 薄编排**：n8n 负责触发、取数、回写；Block 遍历、限速、重试集中在 `contract-generator`。
+2. **n8n 薄编排**：n8n 负责触发、取数、回写；Block 遍历、限速、重试集中在 `feishu-files-generation`。
 3. **配置外置**：签约单位 → 模板 token、占位符映射、文件夹 token 全部在 `config.yaml`，不改代码即可换模板。
 4. **实验优先**：Phase B-3 用 curl 直接调 `/api/generate`，不依赖 n8n，降低调试成本。
 
 ### 2.2 服务边界
 
-| 职责 | contract-generator | n8n | feishu-field-parser |
+| 职责 | feishu-files-generation | n8n | feishu-field-parser |
 | --- | --- | --- | --- |
 | 获取 tenant_access_token | 可选（支持传入或自行获取） | ✅ 默认由 n8n 获取 | — |
 | 读取多维表格记录 | ❌ | ✅ | — |
@@ -84,7 +84,7 @@ flowchart TB
 ## 三、服务目录结构（待创建）
 
 ```text
-contract-generator/
+feishu-files-generation/
 ├── app.py                 # FastAPI 入口、路由
 ├── feishu_client.py       # 飞书 API 封装（token、copy、blocks、batch_update）
 ├── block_filler.py        # 块树遍历、占位符替换、批量更新
@@ -143,20 +143,20 @@ CMD ["python", "app.py"]
 ### 4.3 compose.yaml 追加片段
 
 ```yaml
-  contract-generator:
+  feishu-files-generation:
     build:
-      context: ./contract-generator
+      context: ./feishu-files-generation
       args:
-        BASE_IMAGE: ${CONTRACT_GENERATOR_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
-    container_name: contract-generator
+        BASE_IMAGE: ${FEISHU_FILES_GENERATION_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: feishu-files-generation
     ports:
       - "8030:8030"
     volumes:
-      - ./contract-generator/config.yaml:/app/config.yaml:ro
+      - ./feishu-files-generation/config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Shanghai
-      - CONTRACT_GENERATOR_CONFIG_PATH=/app/config.yaml
-      - CONTRACT_GENERATOR_PORT=8030
+      - FEISHU_FILES_GENERATION_CONFIG_PATH=/app/config.yaml
+      - FEISHU_FILES_GENERATION_PORT=8030
       - FEISHU_APP_ID=${FEISHU_APP_ID}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
       - LOG_LEVEL=INFO
@@ -170,7 +170,7 @@ CMD ["python", "app.py"]
 
 ```env
 # 合同生成（路径 B 实验）
-# CONTRACT_GENERATOR_BASE_IMAGE=docker.1ms.run/library/python:3.12-slim
+# FEISHU_FILES_GENERATION_BASE_IMAGE=docker.1ms.run/library/python:3.12-slim
 # FEISHU_CONTRACT_TEMPLATE_TOKEN=doxcnXXXXXXXX   # POC 用单个模板 token
 # FEISHU_CONTRACT_OUTPUT_FOLDER=fldcnXXXXXXXX    # POC 输出文件夹 token
 ```
@@ -180,7 +180,7 @@ CMD ["python", "app.py"]
 ## 五、config.yaml 完整 schema
 
 ```yaml
-# contract-generator/config.yaml
+# feishu-files-generation/config.yaml
 
 defaults:
   # 未按签约单位匹配时的兜底模板（实验阶段常用）
@@ -679,11 +679,11 @@ curl -s -X POST \
 
 期望：`code: 0`，`data.file.token` 和 `url` 存在。
 
-### 9.4 启动 contract-generator
+### 9.4 启动 feishu-files-generation
 
 ```bash
-docker compose build contract-generator
-docker compose up -d contract-generator
+docker compose build feishu-files-generation
+docker compose up -d feishu-files-generation
 curl http://localhost:8030/health
 # 期望：{"status":"ok"}
 ```
@@ -762,7 +762,7 @@ flowchart LR
   B --> C[HTTP Get Record\n指定 record_id]
   C --> D[HTTP field-parser\n/api/parse]
   D --> E[Code 校验+构造请求体]
-  E --> F[HTTP contract-generator\n/api/generate]
+  E --> F[HTTP feishu-files-generation\n/api/generate]
   F --> G[HTTP 回写\n合同生成状态=已生成]
 ```
 
@@ -789,10 +789,10 @@ return [{
 }];
 ```
 
-### 10.2 HTTP 节点：调用 contract-generator
+### 10.2 HTTP 节点：调用 feishu-files-generation
 
 ```text
-POST http://contract-generator:8030/api/generate
+POST http://feishu-files-generation:8030/api/generate
 Body: ={{ JSON.stringify($json) }}
 Timeout: 120000
 ```
@@ -873,7 +873,7 @@ else:
 
 | 项目 | 路径 B | 路径 C 扩展 |
 | --- | --- | --- |
-| 模板位置 | 飞书云文档 | `contract-generator/templates/*.docx` |
+| 模板位置 | 飞书云文档 | `feishu-files-generation/templates/*.docx` |
 | 填充库 | Block API | `docxtpl` (Jinja2) |
 | 输出 | 飞书在线 docx（copy 后改） | `upload_all` 上传 docx |
 | config 字段 | `template_token` | `local_template_path` |
@@ -900,7 +900,7 @@ else:
 
 | 序号 | 任务 | 预估 | 依赖 |
 | --- | --- | --- | --- |
-| 1 | 创建 `contract-generator/` 骨架 + `/health` | 0.5d | — |
+| 1 | 创建 `feishu-files-generation/` 骨架 + `/health` | 0.5d | — |
 | 2 | 实现 `FeishuClient.copy_file` + 重试 | 0.5d | 飞书权限 |
 | 3 | 实现 `FeishuClient.list_all_blocks` | 0.5d | — |
 | 4 | 实现 `block_filler.replace_in_block` + 单元测试 | 1d | — |

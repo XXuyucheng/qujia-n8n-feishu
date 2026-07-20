@@ -231,7 +231,7 @@ def main() -> None:
     generate = {
         "parameters": {
             "method": "POST",
-            "url": "http://contract-generator:8030/api/generate",
+            "url": "http://feishu-files-generation:8030/api/generate",
             "sendBody": True,
             "specifyBody": "json",
             "jsonBody": "={{ JSON.stringify($json) }}",

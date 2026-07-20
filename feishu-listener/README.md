@@ -7,11 +7,11 @@
 | 应用 | 环境变量 | 事件 | 进程 |
 | --- | --- | --- | --- |
 | 主应用（n8n） | `FEISHU_APP_ID` / `SECRET` | bitable 变更 | 主进程线程内 `lark.ws.Client` |
-| 对话应用（供应商机器人） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1` | 子进程 `chat_ws.py` → `POST /internal/ingest` |
+| 对话应用（feishu-bot） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1` | 子进程 `chat_ws.py` → `POST /internal/ingest` |
 
 同一进程无法跑两个 lark WS Client（asyncio 冲突），故对话应用使用子进程。健康检查字段：`ws_status`、`chat_ws_status`、`chat_ws_pid`。
 
-供应商 IM 路由示例见 `config.yaml` 中 `supplier-bot-im-message`。
+对话 IM 路由示例见 `config.yaml` 中 `feishu-bot-im-message`（转发至 `http://feishu-bot:8040/api/message`）。
 
 ## 运行方式
 
@@ -63,6 +63,7 @@ docker compose up -d feishu-listener
 | `table_id` | 表 ID |
 | `chat_id` | 群聊 ID（消息类事件） |
 | `command` | 斜杠命令，如 `/quote` |
+| `text_contains` | 消息正文（`resource.text`）须包含该子串；用于 IM 口令触发 |
 | `actions` | 按 `action_list[].action` 过滤新建/编辑/删除（见下文） |
 
 **示例：某张表任意字段变动都转发**

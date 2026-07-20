@@ -1,4 +1,4 @@
-"""Contract Generator — Feishu docx template copy + block placeholder fill."""
+"""Feishu Files Generation — Feishu docx template copy + block placeholder fill."""
 
 from __future__ import annotations
 
@@ -38,18 +38,18 @@ from sheet_filler import (
     resolve_sheet_rows,
 )
 
-CONFIG_PATH = Path(os.getenv("CONTRACT_GENERATOR_CONFIG_PATH", "/app/config.yaml"))
-HOST = os.getenv("CONTRACT_GENERATOR_HOST", "0.0.0.0")
-PORT = int(os.getenv("CONTRACT_GENERATOR_PORT", "8030"))
+CONFIG_PATH = Path(os.getenv("FEISHU_FILES_GENERATION_CONFIG_PATH", "/app/config.yaml"))
+HOST = os.getenv("FEISHU_FILES_GENERATION_HOST", "0.0.0.0")
+PORT = int(os.getenv("FEISHU_FILES_GENERATION_PORT", "8030"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-logger = logging.getLogger("contract-generator")
+logger = logging.getLogger("feishu-files-generation")
 
-app = FastAPI(title="Contract Generator", version="0.1.0")
+app = FastAPI(title="Feishu Files Generation", version="0.1.0")
 
 
 def _get_config() -> Dict[str, Any]:
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     if not CONFIG_PATH.exists():
         local = Path(__file__).resolve().parent / "config.yaml"
         if local.exists():
-            os.environ["CONTRACT_GENERATOR_CONFIG_PATH"] = str(local)
+            os.environ["FEISHU_FILES_GENERATION_CONFIG_PATH"] = str(local)
             globals()["CONFIG_PATH"] = local
 
     uvicorn.run(app, host=HOST, port=PORT)

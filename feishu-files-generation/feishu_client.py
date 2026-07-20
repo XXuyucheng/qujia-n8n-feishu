@@ -12,7 +12,7 @@ import httpx
 
 from config_loader import RateLimitConfig
 
-logger = logging.getLogger("contract-generator.feishu")
+logger = logging.getLogger("feishu-files-generation.feishu")
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 RETRYABLE_CODES = {1061045, 99991400}

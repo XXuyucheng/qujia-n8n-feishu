@@ -22,21 +22,33 @@ from feishu_client import FeishuAPIError, FeishuClient
 from router import resolve_skill_id
 from session_store import SessionStore
 
+def _env(*names: str, default: str = "") -> str:
+    for name in names:
+        val = os.getenv(name)
+        if val:
+            return val
+    return default
+
+
 CONFIG_DIR = resolve_config_dir(
-    Path(os.getenv("SUPPLIER_BOT_CONFIG_DIR", "")) if os.getenv("SUPPLIER_BOT_CONFIG_DIR") else None
+    Path(_env("FEISHU_BOT_CONFIG_DIR", "SUPPLIER_BOT_CONFIG_DIR"))
+    if _env("FEISHU_BOT_CONFIG_DIR", "SUPPLIER_BOT_CONFIG_DIR")
+    else None
 )
-DB_PATH = Path(os.getenv("SUPPLIER_BOT_DB_PATH", "/data/sessions.sqlite"))
-HOST = os.getenv("SUPPLIER_BOT_HOST", "0.0.0.0")
-PORT = int(os.getenv("SUPPLIER_BOT_PORT", "8040"))
+DB_PATH = Path(
+    _env("FEISHU_BOT_DB_PATH", "SUPPLIER_BOT_DB_PATH", default="/data/sessions.sqlite")
+)
+HOST = _env("FEISHU_BOT_HOST", "SUPPLIER_BOT_HOST", default="0.0.0.0")
+PORT = int(_env("FEISHU_BOT_PORT", "SUPPLIER_BOT_PORT", default="8040"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL, logging.INFO),
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
-logger = logging.getLogger("supplier-bot")
+logger = logging.getLogger("feishu-bot")
 
-app = FastAPI(title="Supplier Bot (skill platform)", version="0.2.0")
+app = FastAPI(title="Feishu Bot (skill platform)", version="0.2.0")
 store = SessionStore(DB_PATH)
 
 
@@ -81,7 +93,7 @@ def health() -> Dict[str, Any]:
         detail = str(exc)
     return {
         "ok": ok,
-        "service": "supplier-bot",
+        "service": "feishu-bot",
         "config_dir": str(CONFIG_DIR),
         "skills": skill_ids,
         "session_ttl_minutes": app_cfg.get("session_ttl_minutes"),
@@ -192,7 +204,8 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
                 _reply(feishu, resource, f"下载图片失败：{exc.message}")
                 return JSONResponse({"ok": False, "error": exc.message})
 
-        engine = DialogEngine(runtime, feishu)
+        open_id = str(resource.get("open_id") or "")
+        engine = DialogEngine(runtime, feishu, open_id=open_id)
         reply, new_state, payload = engine.handle(
             session=session,
             text=text,
@@ -222,7 +235,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
 @app.post("/api/preview-extract")
 def preview_extract(body: Dict[str, Any]) -> Dict[str, Any]:
     from extractor import extract_fields
-    from validator import resolve_select_fields
+    from validator import apply_field_patterns, resolve_select_fields
 
     app_cfg, skills = _load()
     skill_id = str(body.get("skill_id") or "supplier")
@@ -231,7 +244,11 @@ def preview_extract(body: Dict[str, Any]) -> Dict[str, Any]:
     text = str(body.get("text") or "")
     use_llm = bool(body.get("use_llm", False))
     data = extract_fields(text, runtime, use_llm=use_llm)
-    data, problems = resolve_select_fields(runtime.get("fields") or {}, data)
+    data, problems = apply_field_patterns(runtime.get("fields") or {}, data, runtime)
+    data, select_probs = resolve_select_fields(
+        runtime.get("fields") or {}, data, runtime
+    )
+    problems.extend(select_probs)
     return {"skill_id": runtime.get("skill_id"), "fields": data, "problems": problems}
 
 

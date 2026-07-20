@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 
-CONFIG_PATH = Path(os.getenv("CONTRACT_GENERATOR_CONFIG_PATH", "/app/config.yaml"))
+CONFIG_PATH = Path(os.getenv("FEISHU_FILES_GENERATION_CONFIG_PATH", "/app/config.yaml"))
 LOCAL_TZ = ZoneInfo(os.getenv("TZ", "Asia/Shanghai"))
 
 ENV_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")

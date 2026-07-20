@@ -1,4 +1,4 @@
-"""Pydantic request/response models for contract-generator."""
+"""Pydantic request/response models for feishu-files-generation."""
 
 from __future__ import annotations
 

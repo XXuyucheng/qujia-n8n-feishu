@@ -64,7 +64,7 @@ services:
       - ENABLE_DEBUG_ENDPOINTS=true
     restart: unless-stopped
     depends_on:
-      - supplier-bot
+      - feishu-bot
 
   feishu-field-parser:
     build:
@@ -83,20 +83,20 @@ services:
       - LOG_LEVEL=INFO
     restart: unless-stopped
 
-  contract-generator:
+  feishu-files-generation:
     build:
-      context: ./contract-generator
+      context: ./feishu-files-generation
       args:
-        BASE_IMAGE: ${CONTRACT_GENERATOR_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
-    container_name: contract-generator
+        BASE_IMAGE: ${FEISHU_FILES_GENERATION_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: feishu-files-generation
     ports:
       - "8030:8030"
     volumes:
-      - ./contract-generator/config.yaml:/app/config.yaml:ro
+      - ./feishu-files-generation/config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Shanghai
-      - CONTRACT_GENERATOR_CONFIG_PATH=/app/config.yaml
-      - CONTRACT_GENERATOR_PORT=8030
+      - FEISHU_FILES_GENERATION_CONFIG_PATH=/app/config.yaml
+      - FEISHU_FILES_GENERATION_PORT=8030
       - FEISHU_APP_ID=${FEISHU_APP_ID}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
       - FEISHU_CONTRACT_TEMPLATE_TOKEN=${FEISHU_CONTRACT_TEMPLATE_TOKEN:-}
@@ -106,22 +106,22 @@ services:
       - LOG_LEVEL=INFO
     restart: unless-stopped
 
-  supplier-bot:
+  feishu-bot:
     build:
-      context: ./supplier-bot
+      context: ./feishu-bot
       args:
-        BASE_IMAGE: ${SUPPLIER_BOT_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
-    container_name: supplier-bot
+        BASE_IMAGE: ${FEISHU_BOT_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: feishu-bot
     ports:
       - "8040:8040"
     volumes:
-      - ./supplier-bot/config:/app/config:ro
-      - ./supplier-bot/data:/data
+      - ./feishu-bot/config:/app/config:ro
+      - ./feishu-bot/data:/data
     environment:
       - TZ=Asia/Shanghai
-      - SUPPLIER_BOT_CONFIG_DIR=/app/config
-      - SUPPLIER_BOT_DB_PATH=/data/sessions.sqlite
-      - SUPPLIER_BOT_PORT=8040
+      - FEISHU_BOT_CONFIG_DIR=/app/config
+      - FEISHU_BOT_DB_PATH=/data/sessions.sqlite
+      - FEISHU_BOT_PORT=8040
       - FEISHU_CHAT_APP_ID=${FEISHU_CHAT_APP_ID}
       - FEISHU_CHAT_APP_SECRET=${FEISHU_CHAT_APP_SECRET}
       - FEISHU_BASE_ID=${FEISHU_BASE_ID}

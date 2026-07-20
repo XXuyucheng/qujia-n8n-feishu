@@ -1,15 +1,15 @@
 # 合同生成 · n8n 联调测试手册（小白版）
 
-状态：`联调准备（contract-generator 已可用）`
+状态：`联调准备（feishu-files-generation 已可用）`
 
-服务地址（Docker 内网）：`http://contract-generator:8030`  
+服务地址（Docker 内网）：`http://feishu-files-generation:8030`  
 本机调试：`http://localhost:8030`
 
 相关文档：
 
 - [合同生成工作流.md](./合同生成工作流.md)（路径选型）
 - [合同生成-路径B实现.md](./合同生成-路径B实现.md)（服务实现规格）
-- [contract-generator/README.md](./contract-generator/README.md)（服务说明）
+- [feishu-files-generation/README.md](./feishu-files-generation/README.md)（服务说明）
 
 ---
 
@@ -22,26 +22,26 @@
         ↓
       n8n（编排：取数、拼参数、调服务、回写）
         ↓
-contract-generator（干活：复制模板 + 填空 + 返回文档链接）
+feishu-files-generation（干活：复制模板 + 填空 + 返回文档链接）
         ↓
 飞书云文档文件夹（生成好的合同）
 ```
 
 - **n8n 不负责**改飞书文档内容
-- **contract-generator 不负责**读多维表格、不负责改「合同生成状态」
+- **feishu-files-generation 不负责**读多维表格、不负责改「合同生成状态」
 - 两边靠 **HTTP JSON** 说话
 
 本阶段最小目标：在 n8n 里手动点一下，能调通 `POST /api/generate`，并拿到 `document_url`。
 
 ---
 
-## 二、contract-generator 是什么
+## 二、feishu-files-generation 是什么
 
 | 问题 | 答案 |
 | --- | --- |
 | 它是什么 | 一个 Python FastAPI 微服务，端口 `8030` |
 | 核心能力 | 复制飞书在线文档模板 → 把 `{{占位符}}` 换成真实值 |
-| 配置文件 | `contract-generator/config.yaml`（模板 token、字段映射） |
+| 配置文件 | `feishu-files-generation/config.yaml`（模板 token、字段映射） |
 | 不做什么 | 不读订单表、不写回飞书状态、不解析 PDF |
 
 ### 代码谁在处理什么（对应「哪个脚本」）
@@ -66,7 +66,7 @@ n8n 传「签约单位 + 订单字段」，服务自己查 `config.yaml` 选模�
 **请求**
 
 ```http
-POST http://contract-generator:8030/api/generate
+POST http://feishu-files-generation:8030/api/generate
 Content-Type: application/json
 ```
 
@@ -184,7 +184,7 @@ app.py
 
 ---
 
-## 五、contract-generator 输出什么样
+## 五、feishu-files-generation 输出什么样
 
 ### 成功
 
@@ -232,7 +232,7 @@ app.py
 ### 先不生成、只看映射：preview
 
 ```http
-POST http://contract-generator:8030/api/generate/preview
+POST http://feishu-files-generation:8030/api/generate/preview
 ```
 
 body 与 generate 相同（模式 A）。返回 `placeholders`、`missing_required`，**不写飞书**。联调时建议先 preview，再 generate。
@@ -321,14 +321,14 @@ return [{
 
 **4. HTTP · preview（可选）**
 
-- URL: `http://contract-generator:8030/api/generate/preview`
+- URL: `http://feishu-files-generation:8030/api/generate/preview`
 - Method: `POST`
 - Body: `{{ JSON.stringify($json) }}`
 - 看 `missing_required` 是否为空。
 
 **5. HTTP · generate**
 
-- URL: `http://contract-generator:8030/api/generate`
+- URL: `http://feishu-files-generation:8030/api/generate`
 - Method: `POST`
 - Body: 同上
 - Timeout: 建议 `120000`（2 分钟）
@@ -366,7 +366,7 @@ return [{
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
-| n8n 连不上服务 | URL 写错 | 容器内用 `http://contract-generator:8030`，本机 curl 用 `localhost` |
+| n8n 连不上服务 | URL 写错 | 容器内用 `http://feishu-files-generation:8030`，本机 curl 用 `localhost` |
 | `UNKNOWN_SIGNING_UNIT` | 签约单位名称不一致 | 必须与 `signing_unit_map` 左边完全一致 |
 | `MISSING_REQUIRED_PLACEHOLDER` | fields 缺映射源 | 检查 `单位`、`合同价款`、`执行日期` 等 |
 | 403 / FEISHU_FORBIDDEN | 机器人无文档/文件夹权限 | 给应用加协作者 |

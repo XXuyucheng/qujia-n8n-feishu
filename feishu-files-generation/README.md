@@ -1,4 +1,4 @@
-# Contract Generator
+# Feishu Files Generation
 
 飞书云文档合同 / 出团计划单生成服务（路径 B）：复制 docx 模板 → 遍历 Block → 替换 `{{占位符}}` →（可选）写入内嵌电子表格 Sheet → 返回新文档 URL。
 
@@ -127,7 +127,7 @@ curl -X POST http://localhost:8030/api/generate \
 ## 项目文件结构
 
 ```text
-contract-generator/
+feishu-files-generation/
 ├── app.py                 # FastAPI 入口与主流程
 ├── feishu_client.py       # 飞书 API：token / copy / blocks / batch_update
 ├── block_filler.py        # 块树占位符替换、probe、未解析检测
@@ -147,7 +147,7 @@ contract-generator/
 
 | 组件 | 做什么 | 不做什么 |
 | --- | --- | --- |
-| contract-generator | 复制模板、替换占位符 | 读多维表格、回写状态 |
+| feishu-files-generation | 复制模板、替换占位符 | 读多维表格、回写状态 |
 | n8n | 触发、取数、调本服务、回写 | Block 遍历细节 |
 | feishu-field-parser | field_id → 字段名 | 文档生成 |
 
@@ -157,8 +157,8 @@ contract-generator/
 
 ```bash
 # 在仓库根目录
-docker compose build contract-generator
-docker compose up -d contract-generator
+docker compose build feishu-files-generation
+docker compose up -d feishu-files-generation
 curl http://localhost:8030/health
 # {"status":"ok"}
 ```
@@ -172,12 +172,12 @@ curl http://localhost:8030/health
 | `FEISHU_CONTRACT_OUTPUT_FOLDER` | defaults 兜底输出文件夹 |
 | `FEISHU_DEPARTURE_TEMPLATE_TOKEN` | 出团计划单模板 docx token |
 | `FEISHU_DEPARTURE_OUTPUT_FOLDER` | 出团计划单输出文件夹 token |
-| `CONTRACT_GENERATOR_CONFIG_PATH` | 默认 `/app/config.yaml` |
+| `FEISHU_FILES_GENERATION_CONFIG_PATH` | 默认 `/app/config.yaml` |
 
 修改 `config.yaml` 后无需重建镜像（已只读挂载），重启容器即可：
 
 ```bash
-docker compose restart contract-generator
+docker compose restart feishu-files-generation
 ```
 
 ---
@@ -189,7 +189,7 @@ docker compose restart contract-generator
 推荐在 Docker 内用 Python 3.12 跑（本机若是 3.14，pydantic 可能无 wheel）：
 
 ```bash
-cd contract-generator
+cd feishu-files-generation
 
 docker run --rm -v "$PWD":/app -w /app \
   docker.1ms.run/library/python:3.12-slim \
@@ -202,7 +202,7 @@ docker run --rm -v "$PWD":/app -w /app \
 ### 2. 容器健康检查
 
 ```bash
-docker compose up -d contract-generator
+docker compose up -d feishu-files-generation
 curl -sf http://localhost:8030/health
 curl -sf http://localhost:8030/api/templates | jq .
 ```

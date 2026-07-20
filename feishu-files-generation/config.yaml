@@ -1,4 +1,4 @@
-# contract-generator 模板与占位符映射
+# feishu-files-generation 模板与占位符映射
 # 将 template_token / folder_token 替换为真实飞书 token，或通过环境变量注入 defaults。
 
 defaults:

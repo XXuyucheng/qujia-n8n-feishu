@@ -7,8 +7,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from extractor import extract_fields
 from feishu_client import FeishuAPIError, FeishuClient
+from rules import apply_rules
 from validator import (
+    apply_field_patterns,
     build_bitable_fields,
+    can_overwrite,
     merge_fields,
     missing_payment_hint,
     missing_required,
@@ -17,7 +20,7 @@ from validator import (
     suggested_missing,
 )
 
-logger = logging.getLogger("supplier-bot.dialog")
+logger = logging.getLogger("feishu-bot.dialog")
 
 STATE_IDLE = "idle"
 STATE_COLLECTING = "collecting"
@@ -106,10 +109,55 @@ def _ensure_skill_payload(payload: Dict[str, Any], config: Dict[str, Any]) -> Di
     return payload
 
 
+def _normalize_data(
+    config: Dict[str, Any],
+    data: Dict[str, Any],
+    text: str,
+    sticky_rules: List[str],
+) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    fields_cfg = config.get("fields") or {}
+    problems: List[str] = []
+    data, pattern_probs = apply_field_patterns(fields_cfg, data, config)
+    problems.extend(pattern_probs)
+    data, select_probs = resolve_select_fields(fields_cfg, data, config)
+    problems.extend(select_probs)
+    data, rule_hints, active_rules = apply_rules(
+        text, data, config, sticky_rule_ids=sticky_rules
+    )
+    # re-resolve selects after rule set_fields
+    data, select_probs2 = resolve_select_fields(fields_cfg, data, config)
+    problems.extend(select_probs2)
+    problems.extend(rule_hints)
+    return data, problems, active_rules
+
+
+def _record_supplier_name(record: Dict[str, Any]) -> str:
+    fields = record.get("fields") or {}
+    val = fields.get("供应商")
+    if isinstance(val, list):
+        parts = []
+        for item in val:
+            if isinstance(item, dict) and "text" in item:
+                parts.append(str(item["text"]))
+            else:
+                parts.append(str(item))
+        return "".join(parts) or str(val)
+    if val is None:
+        return ""
+    return str(val)
+
+
 class DialogEngine:
-    def __init__(self, config: Dict[str, Any], feishu: FeishuClient):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        feishu: FeishuClient,
+        *,
+        open_id: str = "",
+    ):
         self.config = config
         self.feishu = feishu
+        self.open_id = open_id or ""
 
     def handle(
         self,
@@ -130,6 +178,7 @@ class DialogEngine:
         state = (session or {}).get("state") or STATE_IDLE
         payload = _ensure_skill_payload(dict((session or {}).get("payload") or {}), self.config)
         data = dict(payload.get("data") or {})
+        sticky_rules = list(payload.get("active_rules") or [])
 
         if image_bytes:
             try:
@@ -153,23 +202,42 @@ class DialogEngine:
                 }
 
             if not text:
-                data, problems = resolve_select_fields(fields_cfg, data)
+                data, problems, sticky_rules = _normalize_data(
+                    self.config, data, text, sticky_rules
+                )
                 payload["data"] = data
+                payload["active_rules"] = sticky_rules
                 if problems:
                     return "\n".join(problems), STATE_COLLECTING, payload
                 return self._after_merge(data, payload, problems=[])
 
-            data, _ = resolve_select_fields(fields_cfg, data)
+            data, _, sticky_rules = _normalize_data(self.config, data, text, sticky_rules)
             payload["data"] = data
+            payload["active_rules"] = sticky_rules
 
         if state == STATE_AWAIT_OVERWRITE:
+            if not can_overwrite(self.config, self.open_id):
+                return (
+                    _prompt(
+                        self.config,
+                        "dedupe_denied",
+                        "无覆盖权限，请联系管理员。\n{detail}",
+                        detail=payload.get("dedupe_detail") or "",
+                    ),
+                    None,
+                    None,
+                )
             if _word_in(text, self.config.get("overwrite_words") or []):
                 return self._write(data, payload, overwrite=True)
             if _word_in(text, self.config.get("cancel_words") or []):
                 return _prompt(self.config, "cancel_overwrite", "已取消。"), None, None
-            name = str(data.get((self.config.get("dedupe") or {}).get("match_field_key") or "") or "")
             return (
-                _prompt(self.config, "dedupe_ask", "记录已存在。回复「覆盖」或「取消」。", name=name),
+                _prompt(
+                    self.config,
+                    "dedupe_ask",
+                    "{detail}\n回复「覆盖」或「取消」。",
+                    detail=payload.get("dedupe_detail") or "记录已存在。",
+                ),
                 STATE_AWAIT_OVERWRITE,
                 payload,
             )
@@ -181,8 +249,11 @@ class DialogEngine:
                 return self._confirm_prompt(data, payload)
             extracted = extract_fields(text, self.config)
             data = merge_fields(data, extracted)
-            data, problems = resolve_select_fields(fields_cfg, data)
+            data, problems, sticky_rules = _normalize_data(
+                self.config, data, text, sticky_rules
+            )
             payload["data"] = data
+            payload["active_rules"] = sticky_rules
             return self._after_merge(data, payload, problems)
 
         if (
@@ -205,15 +276,26 @@ class DialogEngine:
             )
 
         if state == STATE_COLLECTING and _word_in(text, self.config.get("skip_words") or []):
-            if missing_required(fields_cfg, data) or not payment_satisfied(self.config, data):
-                return self._after_merge(data, payload, problems=[])
+            data, problems, sticky_rules = _normalize_data(
+                self.config, data, text, sticky_rules
+            )
+            payload["active_rules"] = sticky_rules
+            if (
+                problems
+                or missing_required(fields_cfg, data)
+                or not payment_satisfied(self.config, data)
+            ):
+                return self._after_merge(data, payload, problems=problems)
             payload["skipped_suggested"] = True
             return self._confirm_prompt(data, payload)
 
         extracted = extract_fields(text, self.config) if text else {}
         data = merge_fields(data, extracted)
-        data, problems = resolve_select_fields(fields_cfg, data)
+        data, problems, sticky_rules = _normalize_data(
+            self.config, data, text, sticky_rules
+        )
         payload["data"] = data
+        payload["active_rules"] = sticky_rules
         return self._after_merge(data, payload, problems)
 
     def _after_merge(
@@ -230,7 +312,7 @@ class DialogEngine:
 
         req = missing_required(fields_cfg, data)
         pay = missing_payment_hint(self.config, data)
-        if req or pay:
+        if problems or req or pay:
             filled = [
                 f"{_field_label(self.config, k)}：{data[k]}"
                 for k in data
@@ -245,7 +327,8 @@ class DialogEngine:
             need = [_field_label(self.config, k) for k in req]
             if pay:
                 need.append(pay)
-            parts.append("还需要补充：\n- " + "\n- ".join(need))
+            if need:
+                parts.append("还需要补充：\n- " + "\n- ".join(need))
             parts.append(_prompt(self.config, "need_more_hint", "可继续补充。回复「取消」结束。"))
             payload["data"] = data
             return "\n\n".join(parts), STATE_COLLECTING, payload
@@ -279,6 +362,55 @@ class DialogEngine:
         )
         return text, STATE_CONFIRMING, payload
 
+    def _dedupe_search(
+        self, *, app_token: str, table_id: str, data: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], str]:
+        dedupe = self.config.get("dedupe") or {}
+        if not dedupe.get("enabled", True):
+            return [], ""
+
+        field_specs = dedupe.get("fields")
+        if not field_specs:
+            # legacy single key
+            match_key = str(dedupe.get("match_field_key") or "")
+            if match_key:
+                field_specs = [{"key": match_key}]
+            else:
+                return [], ""
+
+        hits: List[Dict[str, Any]] = []
+        details: List[str] = []
+        seen_ids: set[str] = set()
+
+        for spec in field_specs:
+            key = str((spec or {}).get("key") or "")
+            if not key or not data.get(key):
+                continue
+            field_name = _field_label(self.config, key)
+            value = str(data[key])
+            try:
+                found = self.feishu.search_records(
+                    app_token=app_token,
+                    table_id=table_id,
+                    field_name=field_name,
+                    value=value,
+                )
+            except FeishuAPIError as exc:
+                raise FeishuAPIError(f"查重失败（{field_name}）：{exc.message}") from exc
+
+            for rec in found:
+                rid = str(rec.get("record_id") or rec.get("id") or "")
+                if rid and rid in seen_ids:
+                    continue
+                if rid:
+                    seen_ids.add(rid)
+                hits.append(rec)
+                other_name = _record_supplier_name(rec) or rid or "已有记录"
+                details.append(f"{field_name}「{value}」已存在于「{other_name}」")
+
+        detail = "检测到重复：\n- " + "\n- ".join(details) if details else ""
+        return hits, detail
+
     def _write(
         self, data: Dict[str, Any], payload: Dict[str, Any], *, overwrite: bool
     ) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
@@ -291,38 +423,77 @@ class DialogEngine:
         bitable_fields = build_bitable_fields(fields_cfg, data)
 
         dedupe = self.config.get("dedupe") or {}
-        match_key = str(dedupe.get("match_field_key") or "")
-        name = str(data.get(match_key) or "") if match_key else ""
-        match_field_name = _field_label(self.config, match_key) if match_key else ""
+        name_key = "supplier_name"
+        if dedupe.get("fields"):
+            name_key = str((dedupe["fields"][0] or {}).get("key") or "supplier_name")
+        elif dedupe.get("match_field_key"):
+            name_key = str(dedupe["match_field_key"])
+        name = str(data.get(name_key) or "")
 
         existing: List[Dict[str, Any]] = []
-        if dedupe.get("enabled", True) and match_field_name and name:
-            try:
-                existing = self.feishu.search_records(
-                    app_token=app_token,
-                    table_id=table_id,
-                    field_name=match_field_name,
-                    value=name,
-                )
-            except FeishuAPIError as exc:
-                return f"查重失败：{exc.message}", STATE_CONFIRMING, payload
+        detail = ""
+        try:
+            existing, detail = self._dedupe_search(
+                app_token=app_token, table_id=table_id, data=data
+            )
+        except FeishuAPIError as exc:
+            return f"{exc.message}", STATE_CONFIRMING, payload
 
-            if existing and not overwrite:
-                on_hit = str(dedupe.get("on_hit") or "ask_overwrite")
-                if on_hit == "reject":
-                    return f"已存在同名「{name}」，已拒绝写入。", None, None
-                payload["data"] = data
-                payload["existing_record_id"] = existing[0].get("record_id") or existing[0].get(
-                    "id"
-                )
+        if existing and not overwrite:
+            allow = can_overwrite(self.config, self.open_id)
+            payload["data"] = data
+            payload["existing_record_id"] = existing[0].get("record_id") or existing[0].get(
+                "id"
+            )
+            payload["dedupe_detail"] = detail
+            if not allow:
                 return (
-                    _prompt(self.config, "dedupe_ask", "已存在同名记录。回复「覆盖」或「取消」。", name=name),
-                    STATE_AWAIT_OVERWRITE,
-                    payload,
+                    _prompt(
+                        self.config,
+                        "dedupe_denied",
+                        "{detail}\n无覆盖权限，请联系管理员。",
+                        detail=detail,
+                    ),
+                    None,
+                    None,
                 )
+            on_hit = str(dedupe.get("on_hit") or "ask_overwrite")
+            if on_hit == "reject":
+                return (
+                    _prompt(
+                        self.config,
+                        "dedupe_denied",
+                        "{detail}\n已拒绝写入。",
+                        detail=detail,
+                    ),
+                    None,
+                    None,
+                )
+            return (
+                _prompt(
+                    self.config,
+                    "dedupe_ask",
+                    "{detail}\n回复「覆盖」或「取消」。",
+                    detail=detail,
+                    name=name,
+                ),
+                STATE_AWAIT_OVERWRITE,
+                payload,
+            )
 
         try:
             if overwrite and payload.get("existing_record_id"):
+                if not can_overwrite(self.config, self.open_id):
+                    return (
+                        _prompt(
+                            self.config,
+                            "dedupe_denied",
+                            "无覆盖权限，请联系管理员。\n{detail}",
+                            detail=payload.get("dedupe_detail") or detail,
+                        ),
+                        None,
+                        None,
+                    )
                 rec = self.feishu.update_record(
                     app_token=app_token,
                     table_id=table_id,
@@ -331,6 +502,17 @@ class DialogEngine:
                 )
                 action = "已更新"
             elif existing and overwrite:
+                if not can_overwrite(self.config, self.open_id):
+                    return (
+                        _prompt(
+                            self.config,
+                            "dedupe_denied",
+                            "无覆盖权限，请联系管理员。\n{detail}",
+                            detail=detail,
+                        ),
+                        None,
+                        None,
+                    )
                 rid = existing[0].get("record_id") or existing[0].get("id")
                 rec = self.feishu.update_record(
                     app_token=app_token,

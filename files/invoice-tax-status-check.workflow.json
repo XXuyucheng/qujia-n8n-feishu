@@ -1,0 +1,426 @@
+{
+  "id": "invoiceTaxCheck01",
+  "name": "发票税务状态校验",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "invoice-tax-check",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "id": "a1000001-tax1-4aa1-8b01-000000000001",
+      "name": "Webhook",
+      "webhookId": "invoice-tax-check-webhook-001"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body || $json;\nconst event = payload.event || payload;\nconst resource = event.resource || {};\n\nconst chatId = String(resource.chat_id || '');\nconst messageId = String(resource.message_id || '');\nconst text = String(resource.text || '');\nconst fileKeys = Array.isArray(resource.file_keys)\n  ? resource.file_keys.map((k) => String(k || '').trim()).filter(Boolean)\n  : [];\nconst fileKey = String(resource.file_key || fileKeys[0] || '').trim();\n\nconst okText = text.includes('发票号校验');\nconst hasFile = Boolean(fileKey);\n\nlet failReason = '';\nif (!okText) failReason = '文案未包含「发票号校验」';\nelse if (!messageId) failReason = '缺少 message_id';\nelse if (!hasFile) failReason = '未找到 Excel 附件（file_key）';\n\nreturn [\n  {\n    json: {\n      chat_id: chatId,\n      message_id: messageId,\n      text,\n      file_key: fileKey,\n      file_keys: fileKeys.length ? fileKeys : fileKey ? [fileKey] : [],\n      ready: !failReason,\n      fail_reason: failReason,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0],
+      "id": "a1000001-tax1-4aa1-8b01-000000000002",
+      "name": "解析事件"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ready-true-001",
+              "leftValue": "={{ $json.ready }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [440, 0],
+      "id": "a1000001-tax1-4aa1-8b01-000000000003",
+      "name": "是否可校验"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_CHAT_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_CHAT_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [680, -160],
+      "id": "a1000001-tax1-4aa1-8b01-000000000004",
+      "name": "获取ChatToken(失败)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/im/v1/messages/{{ $('解析事件').item.json.message_id }}/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"msg_type\": \"text\",\n  \"content\": {{ JSON.stringify(JSON.stringify({ text: '发票校验失败：' + $('解析事件').item.json.fail_reason })) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [920, -160],
+      "id": "a1000001-tax1-4aa1-8b01-000000000005",
+      "name": "回复失败"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_CHAT_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_CHAT_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [680, 80],
+      "id": "a1000001-tax1-4aa1-8b01-000000000006",
+      "name": "获取ChatToken"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/im/v1/messages/{{ $('解析事件').item.json.message_id }}/resources/{{ $('解析事件').item.json.file_key }}?type=file",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.tenant_access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [920, 80],
+      "id": "a1000001-tax1-4aa1-8b01-000000000007",
+      "name": "下载IM附件"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {
+          "sheetName": "发票基础信息"
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [1160, 80],
+      "id": "a1000001-tax1-4aa1-8b01-000000000008",
+      "name": "Extract发票基础信息"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map((i) => i.json);\n\nfunction cell(row, ...keys) {\n  for (const key of keys) {\n    if (row[key] != null && String(row[key]).trim() !== '') {\n      return String(row[key]).trim();\n    }\n  }\n  // fuzzy: header may have spaces\n  for (const [k, v] of Object.entries(row || {})) {\n    const nk = String(k).replace(/\\s+/g, '');\n    if (keys.some((want) => nk === String(want).replace(/\\s+/g, ''))) {\n      if (v != null && String(v).trim() !== '') return String(v).trim();\n    }\n  }\n  return '';\n}\n\nconst taxMap = {};\nfor (const row of rows) {\n  const no = cell(row, '数电发票号码');\n  if (!no) continue;\n  taxMap[no] = {\n    status: cell(row, '发票状态') || '',\n    risk: cell(row, '发票风险等级') || '',\n  };\n}\n\nconst ctx = $('解析事件').first().json;\nconst chatToken = $('获取ChatToken').first().json.tenant_access_token;\n\nif (!Object.keys(taxMap).length) {\n  return [\n    {\n      json: {\n        ok: false,\n        fail_reason: 'Excel「发票基础信息」中没有有效的数电发票号码',\n        chat_id: ctx.chat_id,\n        message_id: ctx.message_id,\n        chat_token: chatToken,\n        taxMap: {},\n        taxCount: 0,\n      },\n    },\n  ];\n}\n\nreturn [\n  {\n    json: {\n      ok: true,\n      chat_id: ctx.chat_id,\n      message_id: ctx.message_id,\n      chat_token: chatToken,\n      taxMap,\n      taxCount: Object.keys(taxMap).length,\n    },\n  },\n];",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 80],
+      "id": "a1000001-tax1-4aa1-8b01-000000000009",
+      "name": "构建taxMap"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "ok-true-001",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1620, 80],
+      "id": "a1000001-tax1-4aa1-8b01-00000000000a",
+      "name": "taxMap是否有效"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/im/v1/messages/{{ $json.message_id }}/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.chat_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"msg_type\": \"text\",\n  \"content\": {{ JSON.stringify(JSON.stringify({ text: '发票校验失败：' + $json.fail_reason })) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1860, -80],
+      "id": "a1000001-tax1-4aa1-8b01-00000000000b",
+      "name": "回复Excel失败"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1860, 160],
+      "id": "a1000001-tax1-4aa1-8b01-00000000000c",
+      "name": "获取MainToken"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('构建taxMap').first().json;\nconst taxMap = prev.taxMap || {};\nconst mainToken = $json.tenant_access_token;\nconst baseId = $env.FEISHU_BASE_ID;\nconst tableId = 'tblNd9zgN7ALihwj';\n\nif (!baseId) {\n  throw new Error('缺少环境变量 FEISHU_BASE_ID');\n}\n\nasync function feishuPost(url, body) {\n  const resp = await this.helpers.httpRequest({\n    method: 'POST',\n    url,\n    headers: {\n      Authorization: `Bearer ${mainToken}`,\n      'Content-Type': 'application/json',\n    },\n    body,\n    json: true,\n  });\n  return resp;\n}\n\nconst records = [];\nlet pageToken = '';\nfor (let page = 0; page < 50; page++) {\n  const qs = new URLSearchParams({ page_size: '500' });\n  if (pageToken) qs.set('page_token', pageToken);\n  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${baseId}/tables/${tableId}/records/search?${qs}`;\n  const resp = await feishuPost.call(this, url, {\n    field_names: ['发票号码'],\n  });\n  if (resp.code !== 0) {\n    throw new Error(`拉取回票表失败: ${resp.msg || JSON.stringify(resp)}`);\n  }\n  const data = resp.data || {};\n  records.push(...(data.items || []));\n  if (!data.has_more) break;\n  pageToken = data.page_token || '';\n  if (!pageToken) break;\n}\n\nfunction splitInvoiceNos(raw) {\n  if (raw == null) return [];\n  return String(raw)\n    .split(/[，,;；\\s]+/)\n    .map((s) => s.trim())\n    .filter(Boolean);\n}\n\nfunction fieldText(fields, name) {\n  const v = fields?.[name];\n  if (v == null) return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v);\n  if (Array.isArray(v)) {\n    return v\n      .map((x) => {\n        if (x == null) return '';\n        if (typeof x === 'string' || typeof x === 'number') return String(x);\n        if (typeof x === 'object') return String(x.text || x.name || x.value || '');\n        return '';\n      })\n      .filter(Boolean)\n      .join('，');\n  }\n  if (typeof v === 'object') return String(v.text || v.name || v.value || '');\n  return String(v);\n}\n\nconst bitableMap = {};\nfor (const rec of records) {\n  const recordId = rec.record_id || rec.id;\n  if (!recordId) continue;\n  const nos = splitInvoiceNos(fieldText(rec.fields || {}, '发票号码'));\n  for (const no of nos) {\n    bitableMap[no] = recordId;\n  }\n}\n\nconst problemsByRecord = {};\nfor (const [no, recordId] of Object.entries(bitableMap)) {\n  const tax = taxMap[no];\n  if (!tax) {\n    if (!problemsByRecord[recordId]) problemsByRecord[recordId] = [];\n    problemsByRecord[recordId].push(`未找到:${no}`);\n    continue;\n  }\n  if (tax.status !== '正常' || tax.risk !== '正常') {\n    if (!problemsByRecord[recordId]) problemsByRecord[recordId] = [];\n    problemsByRecord[recordId].push(\n      `状态异常(${tax.status || '-'}/${tax.risk || '-'}):${no}`,\n    );\n  }\n}\n\nconst updates = Object.entries(problemsByRecord).map(([record_id, parts]) => ({\n  record_id,\n  fields: {\n    税务系统状态: parts.join('；'),\n  },\n}));\n\nconst problemCount = updates.length;\nlet updateFailed = 0;\n\nfor (let i = 0; i < updates.length; i += 500) {\n  const chunk = updates.slice(i, i + 500);\n  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${baseId}/tables/${tableId}/records/batch_update`;\n  const resp = await feishuPost.call(this, url, { records: chunk });\n  if (resp.code !== 0) {\n    updateFailed += chunk.length;\n  }\n}\n\nconst replyText =\n  updateFailed > 0\n    ? `校验完成：${problemCount} 条有问题（其中 ${updateFailed} 条回写失败）`\n    : `校验完成：${problemCount} 条有问题`;\n\nreturn [\n  {\n    json: {\n      ok: true,\n      problemCount,\n      updateFailed,\n      taxCount: prev.taxCount,\n      bitableInvoiceCount: Object.keys(bitableMap).length,\n      bitableRecordCount: records.length,\n      chat_id: prev.chat_id,\n      message_id: prev.message_id,\n      chat_token: prev.chat_token,\n      reply_text: replyText,\n      sample_updates: updates.slice(0, 5),\n    },\n  },\n];",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2100, 160],
+      "id": "a1000001-tax1-4aa1-8b01-00000000000d",
+      "name": "比对并回写"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/im/v1/messages/{{ $json.message_id }}/reply",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.chat_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"msg_type\": \"text\",\n  \"content\": {{ JSON.stringify(JSON.stringify({ text: $json.reply_text })) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [2340, 160],
+      "id": "a1000001-tax1-4aa1-8b01-00000000000e",
+      "name": "回复校验结果"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "解析事件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析事件": {
+      "main": [
+        [
+          {
+            "node": "是否可校验",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "是否可校验": {
+      "main": [
+        [
+          {
+            "node": "获取ChatToken",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "获取ChatToken(失败)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取ChatToken(失败)": {
+      "main": [
+        [
+          {
+            "node": "回复失败",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取ChatToken": {
+      "main": [
+        [
+          {
+            "node": "下载IM附件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载IM附件": {
+      "main": [
+        [
+          {
+            "node": "Extract发票基础信息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract发票基础信息": {
+      "main": [
+        [
+          {
+            "node": "构建taxMap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "构建taxMap": {
+      "main": [
+        [
+          {
+            "node": "taxMap是否有效",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "taxMap是否有效": {
+      "main": [
+        [
+          {
+            "node": "获取MainToken",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "回复Excel失败",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取MainToken": {
+      "main": [
+        [
+          {
+            "node": "比对并回写",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "比对并回写": {
+      "main": [
+        [
+          {
+            "node": "回复校验结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": null,
+  "tags": []
+}

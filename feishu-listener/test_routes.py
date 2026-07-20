@@ -315,6 +315,135 @@ class AppIdAndImNormalizeTests(unittest.TestCase):
         self.assertEqual(
             normalized["resource"]["image_keys"], ["img_v3_0213l_testkey"]
         )
+        self.assertEqual(normalized["resource"]["file_keys"], [])
+
+    def test_file_message_normalize(self):
+        raw = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "im-file-001",
+                "event_type": "im.message.receive_v1",
+                "app_id": "cli_a940966ee8385bd7",
+            },
+            "event": {
+                "sender": {"sender_type": "user", "sender_id": {"open_id": "ou_x"}},
+                "message": {
+                    "message_id": "om_file",
+                    "chat_id": "oc_546b26752d3d6763463f81344c7e77ef",
+                    "chat_type": "group",
+                    "message_type": "file",
+                    "content": json.dumps(
+                        {
+                            "file_key": "file_v3_tax_xlsx",
+                            "file_name": "税务导出.xlsx",
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            },
+        }
+        normalized = normalize_event(raw)
+        self.assertEqual(normalized["resource"]["message_type"], "file")
+        self.assertEqual(normalized["resource"]["file_key"], "file_v3_tax_xlsx")
+        self.assertEqual(normalized["resource"]["file_keys"], ["file_v3_tax_xlsx"])
+
+    def test_post_with_embedded_file_normalize(self):
+        post = {
+            "title": "",
+            "content": [
+                [{"tag": "text", "text": "发票号校验", "style": []}],
+                [
+                    {
+                        "tag": "file",
+                        "file_key": "file_v3_post_attach",
+                        "file_name": "发票基础信息.xlsx",
+                    }
+                ],
+                [
+                    {
+                        "tag": "media",
+                        "file_key": "file_v3_media_attach",
+                        "file_name": "backup.xls",
+                    }
+                ],
+            ],
+        }
+        raw = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "im-post-file-001",
+                "event_type": "im.message.receive_v1",
+                "app_id": "cli_a940966ee8385bd7",
+            },
+            "event": {
+                "sender": {"sender_type": "user", "sender_id": {"open_id": "ou_x"}},
+                "message": {
+                    "message_id": "om_post_file",
+                    "chat_id": "oc_546b26752d3d6763463f81344c7e77ef",
+                    "chat_type": "group",
+                    "message_type": "post",
+                    "content": json.dumps(post, ensure_ascii=False),
+                },
+            },
+        }
+        normalized = normalize_event(raw)
+        self.assertEqual(normalized["resource"]["text"], "发票号校验")
+        self.assertEqual(
+            normalized["resource"]["file_keys"],
+            ["file_v3_post_attach", "file_v3_media_attach"],
+        )
+        self.assertEqual(normalized["resource"]["file_key"], "file_v3_post_attach")
+        self.assertEqual(normalized["resource"]["image_keys"], [])
+
+    def test_text_contains_route_match(self):
+        raw = {
+            "schema": "2.0",
+            "header": {
+                "event_id": "im-tax-001",
+                "event_type": "im.message.receive_v1",
+                "app_id": "cli_a940966ee8385bd7",
+            },
+            "event": {
+                "sender": {"sender_type": "user", "sender_id": {"open_id": "ou_x"}},
+                "message": {
+                    "message_id": "om_tax",
+                    "chat_id": "oc_546b26752d3d6763463f81344c7e77ef",
+                    "chat_type": "group",
+                    "message_type": "post",
+                    "content": json.dumps(
+                        {
+                            "title": "",
+                            "content": [
+                                [{"tag": "text", "text": "请帮忙发票号校验一下"}],
+                                [
+                                    {
+                                        "tag": "file",
+                                        "file_key": "file_v3_x",
+                                    }
+                                ],
+                            ],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            },
+        }
+        event = normalize_event(raw)
+        route_ok = {
+            "enabled": True,
+            "event_type": "im.message.receive_v1",
+            "app_id": "cli_a940966ee8385bd7",
+            "chat_id": "oc_546b26752d3d6763463f81344c7e77ef",
+            "text_contains": "发票号校验",
+        }
+        route_miss_text = {**route_ok, "text_contains": "合同生成"}
+        route_miss_chat = {
+            **route_ok,
+            "chat_id": "oc_other",
+        }
+        self.assertTrue(route_matches(route_ok, event))
+        self.assertFalse(route_matches(route_miss_text, event))
+        self.assertFalse(route_matches(route_miss_chat, event))
 
 
 if __name__ == "__main__":

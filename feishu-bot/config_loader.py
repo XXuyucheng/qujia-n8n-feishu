@@ -44,7 +44,11 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
 def resolve_config_dir(explicit: Optional[Path] = None) -> Path:
     if explicit is not None:
         return explicit
-    env = os.getenv("SUPPLIER_BOT_CONFIG_DIR") or os.getenv("CHAT_BOT_CONFIG_DIR")
+    env = (
+        os.getenv("FEISHU_BOT_CONFIG_DIR")
+        or os.getenv("SUPPLIER_BOT_CONFIG_DIR")
+        or os.getenv("CHAT_BOT_CONFIG_DIR")
+    )
     if env:
         return Path(env)
     # default: ./config next to package, or legacy single file parent
@@ -133,6 +137,12 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
         "aliases": skill.get("aliases") or {},
         "prompts": skill.get("prompts") or {},
         "dedupe": skill.get("dedupe") or {},
+        "rules": skill.get("rules") or [],
+        "ai": skill.get("ai") or app.get("ai") or {},
+        "permissions": {
+            **(app.get("permissions") or {}),
+            **(skill.get("permissions") or {}),
+        },
         "attachment_field": attach_key or "",
         "reply": skill.get("reply") or {"mode": "text"},
         "idle_help": app.get("idle_help") or "",

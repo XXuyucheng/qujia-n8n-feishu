@@ -24,6 +24,13 @@ commands:
   skip: [跳过, 无, skip]
   overwrite: [覆盖, 更新]
 
+# 可覆盖已有记录的管理员（飞书 open_id）。空列表=所有人只能新建、不能覆盖。
+permissions:
+  overwrite_open_ids: []
+  # 示例：
+  # overwrite_open_ids:
+  #   - ou_xxxxxxxx
+
 idle_help: |
   发送「添加供应商」开始录入。也可发送 /供应商。
-  后续将支持更多业务技能（客户、线索等）。
+  后续将支持更多业务技能。

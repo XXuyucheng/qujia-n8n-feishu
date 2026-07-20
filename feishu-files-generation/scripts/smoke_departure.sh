@@ -2,7 +2,7 @@
 # Smoke: preview / generate 出团计划单（需配置 FEISHU_DEPARTURE_* 与 token）
 set -euo pipefail
 
-BASE_URL="${CONTRACT_GENERATOR_URL:-http://127.0.0.1:8030}"
+BASE_URL="${FEISHU_FILES_GENERATION_URL:-http://127.0.0.1:8030}"
 FEISHU_TOKEN="${FEISHU_TOKEN:-}"
 
 if [[ -z "${FEISHU_TOKEN}" ]]; then

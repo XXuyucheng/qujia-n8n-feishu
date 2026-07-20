@@ -81,12 +81,22 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/make-contract
     max_attempts: 3
     timeout_seconds: 10
-  - name: supplier-bot-im-message # 供应商录入对话机器人（对话专用应用）
+  - name: invoice-tax-status-check # 发票税务状态校验（群内发「发票号校验」+ Excel）
     enabled: true
     dispatch_enabled: true
     event_type: im.message.receive_v1
     app_id: cli_a940966ee8385bd7
-    n8n_webhook_url: http://supplier-bot:8040/api/message
+    chat_id: oc_546b26752d3d6763463f81344c7e77ef
+    text_contains: 发票号校验
+    n8n_webhook_url: http://n8n:5678/webhook/invoice-tax-check
+    max_attempts: 2
+    timeout_seconds: 25
+  - name: feishu-bot-im-message # 飞书对话机器人（对话专用应用 · Skill 平台）
+    enabled: true
+    dispatch_enabled: true
+    event_type: im.message.receive_v1
+    app_id: cli_a940966ee8385bd7
+    n8n_webhook_url: http://feishu-bot:8040/api/message
     max_attempts: 2
     timeout_seconds: 25
   - name: make-plan #计划单生成

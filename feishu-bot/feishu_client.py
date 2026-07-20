@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-logger = logging.getLogger("supplier-bot.feishu")
+logger = logging.getLogger("feishu-bot.feishu")
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
 
