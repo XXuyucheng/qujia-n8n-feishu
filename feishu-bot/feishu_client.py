@@ -1,4 +1,8 @@
-"""Feishu Open API client for chat-app identity (IM + bitable)."""
+"""飞书 Open API 客户端（对话专用应用身份）。
+
+用途：IM 回复/发消息、下载消息图片、上传多维表附件、查重搜索、创建/更新记录。
+凭证：FEISHU_CHAT_APP_ID / FEISHU_CHAT_APP_SECRET（不要用 n8n 主应用）。
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,8 @@ FEISHU_BASE = "https://open.feishu.cn/open-apis"
 
 
 class FeishuAPIError(Exception):
+    """飞书接口业务/HTTP 错误。"""
+
     def __init__(
         self,
         message: str,
@@ -31,6 +37,8 @@ class FeishuAPIError(Exception):
 
 
 class FeishuClient:
+    """封装 tenant_access_token 缓存与常用 Open API。"""
+
     def __init__(
         self,
         *,
@@ -54,6 +62,7 @@ class FeishuClient:
         self.close()
 
     def get_tenant_access_token(self) -> str:
+        """获取并缓存 tenant_access_token（提前 60s 刷新）。"""
         if self._token and time.time() < self._token_expire_at - 60:
             return self._token
         if not self.app_id or not self.app_secret:
@@ -79,6 +88,7 @@ class FeishuClient:
         }
 
     def _raise(self, data: Dict[str, Any], action: str) -> None:
+        """飞书 JSON 响应 code!=0 时抛错。"""
         if data.get("code") == 0:
             return
         raise FeishuAPIError(
@@ -88,6 +98,7 @@ class FeishuClient:
         )
 
     def reply_text(self, message_id: str, text: str) -> None:
+        """回复某条消息。"""
         resp = self._client.post(
             f"{FEISHU_BASE}/im/v1/messages/{message_id}/reply",
             headers=self._headers(),
@@ -99,7 +110,10 @@ class FeishuClient:
         data = resp.json()
         self._raise(data, "reply")
 
-    def send_text(self, receive_id: str, text: str, *, receive_id_type: str = "chat_id") -> None:
+    def send_text(
+        self, receive_id: str, text: str, *, receive_id_type: str = "chat_id"
+    ) -> None:
+        """主动向会话发文本。"""
         resp = self._client.post(
             f"{FEISHU_BASE}/im/v1/messages",
             headers=self._headers(),
@@ -116,6 +130,7 @@ class FeishuClient:
     def download_message_resource(
         self, message_id: str, file_key: str, *, resource_type: str = "image"
     ) -> bytes:
+        """下载消息内资源（如图片 image_key）。"""
         resp = self._client.get(
             f"{FEISHU_BASE}/im/v1/messages/{message_id}/resources/{file_key}",
             headers={"Authorization": f"Bearer {self.get_tenant_access_token()}"},
@@ -126,7 +141,6 @@ class FeishuClient:
                 f"download resource failed HTTP {resp.status_code}",
                 http_status=resp.status_code,
             )
-        # may be JSON error
         ctype = resp.headers.get("content-type", "")
         if "application/json" in ctype:
             data = resp.json()
@@ -141,10 +155,10 @@ class FeishuClient:
         parent_node: str,
         parent_type: str = "bitable_file",
     ) -> str:
-        """Upload media for bitable attachment field; returns file_token.
+        """上传附件到多维表可用的 media，返回 file_token。
 
-        Attachment fields need parent_type=bitable_file plus extra.drive_route_token
-        (same as app_token). See Feishu media introduction.
+        附件字段要求 parent_type=bitable_file，且 extra.drive_route_token
+        等于 Base 的 app_token（即 parent_node / base_id）。
         """
         token = self.get_tenant_access_token()
         extra = json_dumps({"drive_route_token": parent_node})
@@ -176,6 +190,7 @@ class FeishuClient:
         value: str,
         page_size: int = 20,
     ) -> List[Dict[str, Any]]:
+        """按单字段精确匹配搜索记录（查重用，operator=is）。"""
         resp = self._client.post(
             f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/search",
             headers=self._headers(),
@@ -200,6 +215,7 @@ class FeishuClient:
     def create_record(
         self, *, app_token: str, table_id: str, fields: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """新建多维表记录。"""
         resp = self._client.post(
             f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
             headers=self._headers(),
@@ -217,6 +233,7 @@ class FeishuClient:
         record_id: str,
         fields: Dict[str, Any],
     ) -> Dict[str, Any]:
+        """更新已有记录（覆盖场景）。"""
         resp = self._client.put(
             f"{FEISHU_BASE}/bitable/v1/apps/{app_token}/tables/{table_id}/records/{record_id}",
             headers=self._headers(),
@@ -228,6 +245,7 @@ class FeishuClient:
 
 
 def json_dumps(obj: Any) -> str:
+    """飞书接口要求 content 等字段为 JSON 字符串。"""
     import json
 
     return json.dumps(obj, ensure_ascii=False)

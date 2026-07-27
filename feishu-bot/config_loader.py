@@ -1,4 +1,4 @@
-"""Load app.yaml + skills/*.yaml and flatten a skill into runtime config."""
+"""加载 app.yaml + skills/*.yaml，并把 skill 展平为 Form Engine 运行时配置。"""
 
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ import yaml
 
 
 class ConfigError(Exception):
+    """配置缺失或格式错误。"""
+
     pass
 
 
@@ -18,6 +20,7 @@ _ENV_PATTERN = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
 
 def _expand_env(value: Any) -> Any:
+    """递归展开 YAML 中的 ${ENV_VAR}。"""
     if isinstance(value, str):
 
         def repl(m: re.Match[str]) -> str:
@@ -42,6 +45,7 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
 
 
 def resolve_config_dir(explicit: Optional[Path] = None) -> Path:
+    """解析配置根目录：显式参数 → 环境变量 → 包旁 ./config。"""
     if explicit is not None:
         return explicit
     env = (
@@ -51,7 +55,6 @@ def resolve_config_dir(explicit: Optional[Path] = None) -> Path:
     )
     if env:
         return Path(env)
-    # default: ./config next to package, or legacy single file parent
     here = Path(__file__).resolve().parent
     candidate = here / "config"
     if candidate.is_dir():
@@ -60,10 +63,12 @@ def resolve_config_dir(explicit: Optional[Path] = None) -> Path:
 
 
 def load_app(config_dir: Path) -> Dict[str, Any]:
+    """读取全局 app.yaml。"""
     return _read_yaml(config_dir / "app.yaml")
 
 
 def load_skills(config_dir: Path) -> Dict[str, Dict[str, Any]]:
+    """加载 skills/*.yaml；enabled:false 跳过；缺 fields/table_id 报错。"""
     skills_dir = config_dir / "skills"
     if not skills_dir.is_dir():
         raise ConfigError(f"skills directory not found: {skills_dir}")
@@ -86,9 +91,9 @@ def load_skills(config_dir: Path) -> Dict[str, Dict[str, Any]]:
 
 
 def _merge_commands(app: Dict[str, Any], skill: Dict[str, Any]) -> Dict[str, List[str]]:
+    """合并全局与 skill 级口令（确认/取消/跳过/覆盖）；skill 优先。"""
     base = dict(app.get("commands") or {})
     override = skill.get("commands") or {}
-    # legacy flat keys on skill
     legacy_map = {
         "cancel": "cancel_words",
         "confirm": "confirm_words",
@@ -107,7 +112,10 @@ def _merge_commands(app: Dict[str, Any], skill: Dict[str, Any]) -> Dict[str, Lis
 
 
 def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, Any]:
-    """Flatten skill+app into the dict Form Engine / extractor expect."""
+    """把 skill + app 展平为 dialog/extractor 使用的 runtime dict。
+
+    含：base_id/table_id、字段、prompts、dedupe、rules、permissions、ai 等。
+    """
     target = skill.get("target") or {}
     commands = _merge_commands(app, skill)
     groups = skill.get("require_any_group") or skill.get("payment_groups") or []
@@ -133,7 +141,7 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
         "overwrite_words": commands["overwrite"],
         "fields": skill.get("fields") or {},
         "require_any_group": groups,
-        "payment_groups": groups,  # backward-compatible alias for validator
+        "payment_groups": groups,  # validator 旧别名
         "aliases": skill.get("aliases") or {},
         "prompts": skill.get("prompts") or {},
         "dedupe": skill.get("dedupe") or {},
@@ -151,13 +159,14 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
     return runtime
 
 
-def load_platform(config_dir: Optional[Path] = None) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
-    """Return (app, skills_by_id)."""
+def load_platform(
+    config_dir: Optional[Path] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """返回 (app 配置, skills_by_id)。兼容旧版单文件 config.yaml。"""
     root = resolve_config_dir(config_dir)
-    # Legacy single-file fallback: config.yaml in parent or dir
     legacy = root / "config.yaml" if root.name != "config" else root.parent / "config.yaml"
     if not (root / "app.yaml").exists() and legacy.exists():
-        # wrap legacy flat config as one supplier skill
+        # 旧扁平配置包装成单一 supplier skill
         flat = _read_yaml(legacy)
         app = {
             "session_ttl_minutes": flat.get("session_ttl_minutes", 30),
@@ -177,7 +186,9 @@ def load_platform(config_dir: Optional[Path] = None) -> Tuple[Dict[str, Any], Di
             "triggers": flat.get("triggers") or [],
             "fields": flat.get("fields") or {},
             "aliases": flat.get("aliases") or {},
-            "require_any_group": flat.get("payment_groups") or flat.get("require_any_group") or [],
+            "require_any_group": flat.get("payment_groups")
+            or flat.get("require_any_group")
+            or [],
             "target": {
                 "type": "bitable",
                 "base_id": flat.get("base_id") or os.getenv("FEISHU_BASE_ID", ""),
@@ -205,20 +216,19 @@ def load_platform(config_dir: Optional[Path] = None) -> Tuple[Dict[str, Any], Di
 
 
 def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
-    """
-    Compatibility entry: return the default (first/supplier) skill runtime config.
-    Prefer load_platform() + skill_to_runtime() for multi-skill.
+    """兼容入口：返回默认（supplier）skill 的 runtime。
+
+    多 skill 场景请用 load_platform() + skill_to_runtime()。
     """
     if path is not None and path.is_file():
-        # old tests passing config.yaml file
         flat = _read_yaml(path)
-        app, skills = load_platform(path.parent / "config" if (path.parent / "config").is_dir() else path.parent)
-        # if skills dir exists alongside, prefer platform
+        app, skills = load_platform(
+            path.parent / "config" if (path.parent / "config").is_dir() else path.parent
+        )
         if (path.parent / "config" / "app.yaml").exists():
             app, skills = load_platform(path.parent / "config")
             skill = skills.get("supplier") or next(iter(skills.values()))
             return skill_to_runtime(skill, app)
-        # pure legacy file
         app = {
             "session_ttl_minutes": flat.get("session_ttl_minutes", 30),
             "commands": {},
@@ -242,7 +252,11 @@ def load_config(path: Optional[Path] = None) -> Dict[str, Any]:
                 "skip": flat.get("skip_words") or [],
                 "overwrite": flat.get("overwrite_words") or [],
             },
-            "dedupe": {"enabled": True, "match_field_key": "supplier_name", "on_hit": "ask_overwrite"},
+            "dedupe": {
+                "enabled": True,
+                "match_field_key": "supplier_name",
+                "on_hit": "ask_overwrite",
+            },
             "attachment": {"field_key": "qrcode"},
             "prompts": {},
         }

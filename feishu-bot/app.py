@@ -1,4 +1,8 @@
-"""Skill-based Feishu chat bot — multi-turn dialog → bitable."""
+"""feishu-bot HTTP 入口。
+
+职责：接收 listener 转发的 IM 消息 → 路由到 skill → 跑多轮 Form Engine → 回复飞书。
+写表 / 发消息均使用「对话专用应用」凭证（FEISHU_CHAT_APP_*），与 n8n 主应用隔离。
+"""
 
 from __future__ import annotations
 
@@ -22,7 +26,9 @@ from feishu_client import FeishuAPIError, FeishuClient
 from router import resolve_skill_id
 from session_store import SessionStore
 
+
 def _env(*names: str, default: str = "") -> str:
+    """按优先级读取环境变量，兼容旧名 SUPPLIER_BOT_*。"""
     for name in names:
         val = os.getenv(name)
         if val:
@@ -30,6 +36,7 @@ def _env(*names: str, default: str = "") -> str:
     return default
 
 
+# ---------- 运行时路径与服务配置 ----------
 CONFIG_DIR = resolve_config_dir(
     Path(_env("FEISHU_BOT_CONFIG_DIR", "SUPPLIER_BOT_CONFIG_DIR"))
     if _env("FEISHU_BOT_CONFIG_DIR", "SUPPLIER_BOT_CONFIG_DIR")
@@ -53,10 +60,12 @@ store = SessionStore(DB_PATH)
 
 
 def _load() -> tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """加载 app.yaml + skills/*.yaml。"""
     return load_platform(CONFIG_DIR)
 
 
 def _session_key(resource: Dict[str, Any]) -> str:
+    """会话键：群聊按「用户+群」隔离，单聊按 open_id。"""
     open_id = str(resource.get("open_id") or "")
     chat_id = str(resource.get("chat_id") or "")
     chat_type = str(resource.get("chat_type") or "")
@@ -66,6 +75,7 @@ def _session_key(resource: Dict[str, Any]) -> str:
 
 
 def _reply(feishu: FeishuClient, resource: Dict[str, Any], text: str) -> None:
+    """优先 reply 原消息；无 message_id 时退化为向 chat 发文本。"""
     message_id = str(resource.get("message_id") or "")
     chat_id = str(resource.get("chat_id") or "")
     try:
@@ -81,6 +91,7 @@ def _reply(feishu: FeishuClient, resource: Dict[str, Any], text: str) -> None:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
+    """健康检查：配置是否可读、当前已加载的 skill 列表。"""
     try:
         app_cfg, skills = _load()
         ok = True
@@ -104,6 +115,7 @@ def health() -> Dict[str, Any]:
 
 @app.get("/skills")
 def list_skills() -> Dict[str, Any]:
+    """列出已启用 skill 的摘要（触发词、目标表）。"""
     _, skills = _load()
     return {
         "skills": [
@@ -120,13 +132,20 @@ def list_skills() -> Dict[str, Any]:
 
 @app.post("/api/message")
 def api_message(body: Dict[str, Any]) -> JSONResponse:
+    """主入口：feishu-listener 转发的 IM 事件。
+
+    流程：幂等去重 → 过期会话 → 群聊 @ 过滤 → 解析 skill →
+    下载图片（如有）→ DialogEngine → 持久化会话 → 回复用户。
+    """
     event = body.get("event") or body
     resource = event.get("resource") or {}
     sender_type = str(resource.get("sender_type") or "")
+    # 忽略机器人自己发出的消息，避免循环
     if sender_type == "bot":
         return JSONResponse({"ok": True, "skipped": "bot_sender"})
 
     message_id = str(resource.get("message_id") or "")
+    # 同一 message_id 只处理一次（飞书可能重推）
     if not store.claim_message(message_id):
         return JSONResponse({"ok": True, "skipped": "duplicate_message"})
 
@@ -143,6 +162,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
 
     chat_type = str(resource.get("chat_type") or "p2p")
     mentions = resource.get("mentions") or []
+    # 群聊：无进行中会话且未 @ 机器人则忽略
     if not should_handle_group(
         chat_type=chat_type,
         mentions=mentions if isinstance(mentions, list) else [],
@@ -153,6 +173,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
 
     text = str(resource.get("text") or "")
     message_type = str(resource.get("message_type") or "text")
+    # 图片可能来自 message_type=image，或 post 富文本里的 img
     image_keys: list[str] = []
     raw_keys = resource.get("image_keys") or []
     if isinstance(raw_keys, list):
@@ -171,8 +192,12 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
     feishu = FeishuClient()
     try:
         if not skill_id:
-            # idle help / menu
-            help_text = str(app_cfg.get("idle_help") or app_cfg.get("router", {}).get("ambiguous_reply") or "")
+            # 未命中任何技能：返回 idle 帮助菜单
+            help_text = str(
+                app_cfg.get("idle_help")
+                or app_cfg.get("router", {}).get("ambiguous_reply")
+                or ""
+            )
             if not help_text:
                 help_text = "请发送业务指令，例如：添加供应商"
             _reply(feishu, resource, help_text)
@@ -189,6 +214,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
                 image_bytes = feishu.download_message_resource(
                     message_id, key, resource_type="image"
                 )
+                # 根据文件头猜测扩展名，便于后续上传
                 if image_bytes[:3] == b"\xff\xd8\xff":
                     image_name = "attachment.jpg"
                 elif image_bytes[:8] == b"\x89PNG\r\n\x1a\n":
@@ -204,6 +230,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
                 _reply(feishu, resource, f"下载图片失败：{exc.message}")
                 return JSONResponse({"ok": False, "error": exc.message})
 
+        # open_id 用于覆盖权限白名单判断
         open_id = str(resource.get("open_id") or "")
         engine = DialogEngine(runtime, feishu, open_id=open_id)
         reply, new_state, payload = engine.handle(
@@ -215,6 +242,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
         )
         if payload is not None:
             payload["skill_id"] = skill_id
+        # new_state 为 None 表示会话结束（取消 / 写入成功 / 拒绝覆盖等）
         if new_state is None:
             store.clear(skey)
         else:
@@ -234,6 +262,7 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
 
 @app.post("/api/preview-extract")
 def preview_extract(body: Dict[str, Any]) -> Dict[str, Any]:
+    """调试接口：只做字段抽取 + 校验，不写会话、不写表。"""
     from extractor import extract_fields
     from validator import apply_field_patterns, resolve_select_fields
 

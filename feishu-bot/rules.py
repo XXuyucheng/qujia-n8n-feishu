@@ -1,4 +1,8 @@
-"""Skill YAML rules: keyword triggers, auto-set fields, name patterns."""
+"""Skill YAML 业务规则：关键词命中 → 自动设字段 / 名称 pattern 校验。
+
+示例（供应商 skill）：消息含「客户退款」→ supplier_type=客户退款，
+且 supplier_name 须匹配「客户退款+订单号数字」。
+"""
 
 from __future__ import annotations
 
@@ -13,16 +17,21 @@ def apply_rules(
     *,
     sticky_rule_ids: List[str] | None = None,
 ) -> Tuple[Dict[str, Any], List[str], List[str]]:
-    """
-    Apply skill rules against message text and current field data.
+    """对当前消息与字段草稿应用 skill.rules。
 
-    Returns (data, hint_messages, active_rule_ids).
-    sticky_rule_ids: rules already activated in this session (keep enforcing).
+    参数：
+        sticky_rule_ids: 本会话已激活的规则 id（后续轮次即使不再提关键词也继续强制）
+
+    返回：
+        (更新后的 data, 提示文案列表, 当前激活的 rule id 列表)
     """
     out = dict(data or {})
     hints: List[str] = []
     active: List[str] = list(sticky_rule_ids or [])
-    blob = f"{text or ''}\n" + "\n".join(str(v) for v in out.values() if v not in (None, "", []))
+    # 关键词既匹配原文，也匹配已填字段值（防用户只改名不提关键词）
+    blob = f"{text or ''}\n" + "\n".join(
+        str(v) for v in out.values() if v not in (None, "", [])
+    )
 
     for rule in config.get("rules") or []:
         if not isinstance(rule, dict):
@@ -35,9 +44,11 @@ def apply_rules(
         if rid and rid not in active:
             active.append(rid)
 
+        # 自动写入字段（如类型=客户退款）
         for key, val in (rule.get("set_fields") or {}).items():
             out[key] = val
 
+        # 名称必须符合正则，否则给出 hint（上层停留 collecting）
         pattern = rule.get("require_name_pattern")
         if pattern:
             name = str(out.get("supplier_name") or "").strip()

@@ -1,3 +1,5 @@
+"""feishu-bot 单元测试：配置加载、路由、抽取、校验、规则、对话与查重权限。"""
+
 import copy
 import unittest
 from pathlib import Path
@@ -18,8 +20,10 @@ from validator import (
     build_bitable_fields,
     can_overwrite,
     fuzzy_match_option,
+    is_blank_value,
     missing_required,
     payment_satisfied,
+    reconcile_qrcode_payment,
     resolve_select_fields,
 )
 
@@ -29,6 +33,8 @@ CONFIG = skill_to_runtime(SKILLS["supplier"], APP)
 
 
 class ConfigSkillTests(unittest.TestCase):
+    """平台配置与 skill runtime 加载。"""
+
     def test_platform_loads_supplier(self):
         self.assertIn("supplier", SKILLS)
         self.assertEqual(CONFIG["skill_id"], "supplier")
@@ -41,12 +47,17 @@ class ConfigSkillTests(unittest.TestCase):
 
 
 class RouterTests(unittest.TestCase):
+    """触发词匹配与会话粘性 skill。"""
+
     def test_match_trigger(self):
         self.assertEqual(match_trigger("添加供应商：测试", SKILLS), "supplier")
         self.assertIsNone(match_trigger("你好", SKILLS))
 
     def test_sticky_session(self):
-        session = {"state": STATE_COLLECTING, "payload": {"skill_id": "supplier", "data": {}}}
+        session = {
+            "state": STATE_COLLECTING,
+            "payload": {"skill_id": "supplier", "data": {}},
+        }
         self.assertEqual(
             resolve_skill_id(text="补联系方式", session=session, skills=SKILLS),
             "supplier",
@@ -54,8 +65,13 @@ class RouterTests(unittest.TestCase):
 
 
 class ExtractorTests(unittest.TestCase):
+    """规则抽取：标签行、触发词+名称、空占位符。"""
+
     def test_labeled_lines(self):
-        text = "添加供应商\n供应商：德清茶歇A\n户名：张三\n账号：6222 001\n银行：工行\n结算类型：月结\n地域：德清"
+        text = (
+            "添加供应商\n供应商：德清茶歇A\n户名：张三\n账号：6222 001\n"
+            "银行：工行\n结算类型：月结\n地域：德清"
+        )
         data = extract_by_rules(text, CONFIG)
         self.assertEqual(data["supplier_name"], "德清茶歇A")
         self.assertEqual(data["account_name"], "张三")
@@ -68,8 +84,38 @@ class ExtractorTests(unittest.TestCase):
         data = extract_by_rules("添加供应商 杭州某某民宿", CONFIG)
         self.assertEqual(data.get("supplier_name"), "杭州某某民宿")
 
+    def test_blank_tokens_wu_meiyou_slash(self):
+        text = (
+            "添加供应商\n供应商名称：导游唐唐\n户名：无\n账号：没有\n银行：/\n"
+            "地域：杭州\n类型：导游\n结算类型：现结\n联系方式：15658110209"
+        )
+        data = extract_by_rules(text, CONFIG)
+        self.assertEqual(data.get("supplier_name"), "导游唐唐")
+        self.assertNotIn("account_name", data)
+        self.assertNotIn("account_no", data)
+        self.assertNotIn("bank_name", data)
+        self.assertEqual(data.get("region"), "杭州")
+        self.assertFalse(is_blank_value("导游唐唐"))
+        self.assertTrue(is_blank_value("无"))
+        self.assertTrue(is_blank_value("/"))
+
+    def test_empty_label_values_not_swallow_next_line(self):
+        text = (
+            "添加供应商\n供应商名称：导游唐唐\n户名：\n账号：\n银行：\n"
+            "地域：杭州\n类型：导游\n结算类型：现结\n联系方式：15658110209"
+        )
+        data = extract_by_rules(text, CONFIG)
+        self.assertEqual(data.get("supplier_name"), "导游唐唐")
+        self.assertNotIn("account_name", data)
+        self.assertNotIn("account_no", data)
+        self.assertNotIn("bank_name", data)
+        self.assertEqual(data.get("region"), "杭州")
+        self.assertEqual(data.get("contact"), "15658110209")
+
 
 class ValidatorTests(unittest.TestCase):
+    """选项模糊匹配、组合必填、账号 digits、覆盖白名单。"""
+
     def test_bank_fuzzy(self):
         opts = CONFIG["fields"]["bank_name"]["options"]
         self.assertEqual(fuzzy_match_option("工行", opts), "中国工商银行")
@@ -87,6 +133,21 @@ class ValidatorTests(unittest.TestCase):
 
     def test_payment_qrcode(self):
         data = {"supplier_name": "A", "qrcode": [{"file_token": "tok"}]}
+        self.assertTrue(payment_satisfied(CONFIG, data))
+
+    def test_reconcile_qrcode_ignores_bad_bank(self):
+        """有收款码时，非法银行选项不阻断（字段清空、问题丢弃）。"""
+        data = {
+            "supplier_name": "A",
+            "bank_name": "火星银行",
+            "qrcode": [{"file_token": "tok"}],
+        }
+        data, problems = resolve_select_fields(CONFIG["fields"], data, CONFIG)
+        self.assertNotIn("bank_name", data)
+        self.assertTrue(problems)
+        data, problems = reconcile_qrcode_payment(CONFIG, data, problems)
+        self.assertEqual(problems, [])
+        self.assertIn("qrcode", data)
         self.assertTrue(payment_satisfied(CONFIG, data))
 
     def test_resolve_select(self):
@@ -137,6 +198,8 @@ class ValidatorTests(unittest.TestCase):
 
 
 class FakeFeishu:
+    """测试用假飞书客户端：可控查重命中，记录 create/update 调用。"""
+
     def __init__(self, hits=None):
         self.hits = hits or []
         self.search_calls = []
@@ -152,7 +215,6 @@ class FakeFeishu:
         value = kwargs.get("value")
         out = []
         for hit in self.hits:
-            # hit: {"match_field": "供应商"|"户名"|"账号", "record": {...}}
             if hit.get("match_field") == field and hit.get("match_value") == value:
                 out.append(hit["record"])
         return out
@@ -167,6 +229,8 @@ class FakeFeishu:
 
 
 class RulesTests(unittest.TestCase):
+    """客户退款关键词规则。"""
+
     def test_customer_refund_sets_type_and_hint(self):
         data, hints, active = apply_rules(
             "客户退款 需要处理",
@@ -189,6 +253,46 @@ class RulesTests(unittest.TestCase):
 
 
 class DialogTests(unittest.TestCase):
+    """多轮对话、退款拦截、查重权限、附件上传。"""
+
+    def test_blank_payment_fields_no_false_errors(self):
+        """户名/账号/银行填「无」时不应产生账号/选项报错。"""
+        engine = DialogEngine(CONFIG, FakeFeishu())
+        text = (
+            "添加供应商\n供应商名称：导游唐唐\n户名：无\n账号：无\n银行：无\n"
+            "地域：杭州\n类型：导游\n结算类型：现结\n联系方式：15658110209"
+        )
+        reply, state, payload = engine.handle(
+            session=None, text=text, message_type="text"
+        )
+        self.assertEqual(state, STATE_COLLECTING)
+        self.assertNotIn("纯数字", reply)
+        self.assertNotIn("不存在", reply)
+        self.assertNotIn("account_no", payload["data"])
+        self.assertNotIn("bank_name", payload["data"])
+        self.assertIn("还需要", reply)
+        self.assertIn("支付信息", reply)
+
+    def test_empty_colon_payment_fields_no_false_errors(self):
+        """户名：/账号：/银行：为空时，不应把下一行标签吞进字段。"""
+        engine = DialogEngine(CONFIG, FakeFeishu())
+        text = (
+            "添加供应商\n供应商名称：导游唐唐\n户名：\n账号：\n银行：\n"
+            "地域：杭州\n类型：导游\n结算类型：现结\n联系方式：15658110209"
+        )
+        reply, state, payload = engine.handle(
+            session=None, text=text, message_type="text"
+        )
+        self.assertEqual(state, STATE_COLLECTING)
+        self.assertNotIn("纯数字", reply)
+        self.assertNotIn("不存在", reply)
+        data = payload["data"]
+        self.assertEqual(data.get("supplier_name"), "导游唐唐")
+        self.assertEqual(data.get("region"), "杭州")
+        self.assertNotIn("account_name", data)
+        self.assertNotIn("account_no", data)
+        self.assertNotIn("bank_name", data)
+
     def test_trigger(self):
         self.assertTrue(is_trigger("添加供应商 测试", CONFIG))
 
@@ -196,7 +300,8 @@ class DialogTests(unittest.TestCase):
         engine = DialogEngine(CONFIG, FakeFeishu())
         text = (
             "添加供应商\n供应商：单元测试店\n户名：李四\n账号：6222001\n"
-            "银行：工行\n地域：德清\n类型：餐厅\n结算类型：月结\n联系方式：13800000000\n开户支行：某某支行"
+            "银行：工行\n地域：德清\n类型：餐厅\n结算类型：月结\n"
+            "联系方式：13800000000\n开户支行：某某支行"
         )
         reply, state, payload = engine.handle(
             session=None, text=text, message_type="text"
@@ -232,8 +337,7 @@ class DialogTests(unittest.TestCase):
     def test_account_invalid_in_dialog(self):
         engine = DialogEngine(CONFIG, FakeFeishu())
         text = (
-            "添加供应商\n供应商：账号测\n户名：李四\n账号：6222ABCD\n"
-            "银行：工行"
+            "添加供应商\n供应商：账号测\n户名：李四\n账号：6222ABCD\n银行：工行"
         )
         reply, state, payload = engine.handle(
             session=None, text=text, message_type="text"
@@ -262,6 +366,46 @@ class DialogTests(unittest.TestCase):
         )
         self.assertIsNone(state)
         self.assertIn("已创建", reply)
+
+    def test_dedupe_ignores_account_name_only(self):
+        """仅户名相同不查重；须撞供应商名或账号才触发。"""
+        feishu = FakeFeishu(
+            hits=[
+                {
+                    "match_field": "户名",
+                    "match_value": "王五",
+                    "record": {
+                        "record_id": "rec_old",
+                        "fields": {"供应商": "别人店", "户名": "王五"},
+                    },
+                }
+            ]
+        )
+        engine = DialogEngine(CONFIG, feishu, open_id="ou_normal")
+        session = {
+            "state": STATE_CONFIRMING,
+            "payload": {
+                "skill_id": "supplier",
+                "data": {
+                    "supplier_name": "新店不撞名",
+                    "account_name": "王五",
+                    "account_no": "111222333",
+                    "bank_name": "中国工商银行",
+                },
+                "skipped_suggested": True,
+            },
+        }
+        reply, state, payload = engine.handle(
+            session=session, text="确认", message_type="text"
+        )
+        self.assertIsNone(state)
+        self.assertIn("已创建", reply)
+        self.assertIsNotNone(feishu.created)
+        # 不应去搜「户名」
+        searched = {c.get("field_name") for c in feishu.search_calls}
+        self.assertNotIn("户名", searched)
+        self.assertIn("供应商", searched)
+        self.assertIn("账号", searched)
 
     def test_dedupe_denied_without_permission(self):
         feishu = FakeFeishu(
@@ -369,6 +513,55 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(payload["data"]["qrcode"][0]["file_token"], "file_token_x")
         self.assertIn(state, (STATE_COLLECTING, STATE_CONFIRMING))
         self.assertTrue(reply)
+
+    def test_qrcode_only_reaches_confirm(self):
+        """仅供应商名 + 收款码图片即可进入确认，无需户名账号银行。"""
+        engine = DialogEngine(CONFIG, FakeFeishu())
+        session = {
+            "state": STATE_COLLECTING,
+            "payload": {
+                "skill_id": "supplier",
+                "data": {"supplier_name": "仅收款码店"},
+                "skipped_suggested": True,
+            },
+        }
+        reply, state, payload = engine.handle(
+            session=session,
+            text="",
+            message_type="image",
+            image_bytes=b"\x89PNG\r\n\x1a\nfake",
+            image_name="qrcode.png",
+        )
+        self.assertEqual(state, STATE_CONFIRMING)
+        self.assertIn("qrcode", payload["data"])
+        self.assertNotIn("account_no", payload["data"])
+        self.assertIn("确认", reply)
+
+    def test_qrcode_with_invalid_bank_still_confirms(self):
+        """已有收款码时，会话里残留的非法银行名不应再拦住确认。"""
+        engine = DialogEngine(CONFIG, FakeFeishu())
+        session = {
+            "state": STATE_COLLECTING,
+            "payload": {
+                "skill_id": "supplier",
+                "data": {
+                    "supplier_name": "码优先店",
+                    "bank_name": "火星银行不存在",
+                },
+                "skipped_suggested": True,
+            },
+        }
+        reply, state, payload = engine.handle(
+            session=session,
+            text="",
+            message_type="image",
+            image_bytes=b"\x89PNG\r\n\x1a\nfake",
+            image_name="qrcode.png",
+        )
+        self.assertEqual(state, STATE_CONFIRMING)
+        self.assertIn("qrcode", payload["data"])
+        self.assertNotIn("bank_name", payload["data"])
+        self.assertNotIn("不存在", reply)
 
 
 if __name__ == "__main__":

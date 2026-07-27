@@ -26,7 +26,7 @@ commands:
 
 # 可覆盖已有记录的管理员（飞书 open_id）。空列表=所有人只能新建、不能覆盖。
 permissions:
-  overwrite_open_ids: []
+  overwrite_open_ids: [ou_8dd0ac5df99798afe9745d5e0e97d650]
   # 示例：
   # overwrite_open_ids:
   #   - ou_xxxxxxxx

@@ -104,9 +104,10 @@ fields:
     - 桂林银行股份有限公司
     - 湖州银行股份有限公司
     - 华夏银行股份有限公司总行
-    - 宁波鄞州农村商业银行股份有限公司(鄞州银 行)
+    - 宁波鄞州农村商业银行股份有限公司(鄞州银行)
     - 杭州银行股份有限公司
     - 兴业银行总行
+    - 浦发银行
     - 上海农村商业银行
     - 江苏银行股份有限公司
     - 中信银行股份有限公司
@@ -190,6 +191,7 @@ fields:
     - 景区（基地）
     - 餐厅
     - 客户退款
+    - 导游
   scan_note:
     name: 扫码备注
     field_id: fldmdR8OD3
@@ -256,7 +258,6 @@ dedupe:
   enabled: true
   fields:
   - key: supplier_name
-  - key: account_name
   - key: account_no
   on_hit: ask_overwrite
   on_hit_denied: reject
