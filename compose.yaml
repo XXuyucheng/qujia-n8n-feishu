@@ -115,7 +115,8 @@ services:
     ports:
       - "8040:8040"
     volumes:
-      - ./feishu-bot/config:/app/config:ro
+      # 挂载源码，改 .py 后 restart 即可生效（依赖仍来自镜像）
+      - ./feishu-bot:/app
       - ./feishu-bot/data:/data
     environment:
       - TZ=Asia/Shanghai

@@ -10,22 +10,44 @@ from typing import Any, Dict, List, Optional, Tuple
 _BLANK_TOKENS = {
     "无",
     "没有",
+    "没",
     "无有",
     "暂无",
+    "没有了",
+    "不填",
+    "不写",
     "空",
+    "空着",
+    "空白",
+    "无无",
+    "无。",
     "不详",
     "未知",
-    "无。",
+    "没有账号",
+    "无账号",
+    "没有户名",
+    "无户名",
+    "没有银行",
+    "无银行",
     "/",
+    "／",
     "\\",
     "-",
+    "－",
     "—",
     "–",
+    "~",
+    "～",
+    "*",
+    "＊",
+    ".",
+    "。",
     "n/a",
     "na",
     "null",
     "none",
     "nil",
+    "undefined",
 }
 
 
@@ -40,8 +62,17 @@ def is_blank_value(value: Any) -> bool:
     s = value.strip()
     if not s:
         return True
-    # 大小写不敏感英文占位 + 中文原样
-    return s.lower() in _BLANK_TOKENS or s in _BLANK_TOKENS
+    # 去掉常见包裹符号后再判
+    s2 = s.strip("（）()【】[]「」\"'“”")
+    if not s2:
+        return True
+    low = s2.lower()
+    if low in _BLANK_TOKENS or s2 in _BLANK_TOKENS:
+        return True
+    # 纯占位符重复：---、///、……
+    if re.fullmatch(r"[\-－—–/~～./／。.*＊\\]+", s2):
+        return True
+    return False
 
 
 def _norm(s: str) -> str:

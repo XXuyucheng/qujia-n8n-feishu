@@ -1,0 +1,432 @@
+{
+  "name": "供应商AI补全",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000001",
+      "name": "手动触发"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        220,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000002",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID || 'Y2ZgbUGWqa0MB4sLmXxc89T5n0P' }}/tables/tbl4vQ8kft1XXSLv/records/search?page_size=500",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"view_id\": \"vewjGvlbFc\", \"field_names\": [\"供应商\", \"户名\", \"开户支行\", \"银行名称\", \"类型\", \"地域\", \"资质\", \"AI 标记\"]}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        460,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000003",
+      "name": "查询供应商视图首页"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const token = $('获取飞书Token').first().json.tenant_access_token;\nconst baseId = $env.FEISHU_BASE_ID || 'Y2ZgbUGWqa0MB4sLmXxc89T5n0P';\nconst tableId = 'tbl4vQ8kft1XXSLv';\nconst viewId = 'vewjGvlbFc';\nconst first = $json;\n\nif (first.code !== 0 && first.code !== undefined) {\n  throw new Error(`拉取供应商表失败: ${first.msg || JSON.stringify(first)}`);\n}\n\nconst searchBody = {\n  view_id: viewId,\n  field_names: ['供应商', '户名', '开户支行', '银行名称', '类型', '地域', '资质', 'AI 标记'],\n};\n\nfunction pickText(field) {\n  if (field == null) return '';\n  if (typeof field === 'string') return field.trim();\n  if (typeof field === 'number') return String(field);\n  if (Array.isArray(field)) {\n    if (!field.length) return '';\n    const first = field[0];\n    if (typeof first === 'string') return first.trim();\n    if (first && typeof first.text === 'string') return first.text.trim();\n    return pickText(first);\n  }\n  if (typeof field === 'object') {\n    if (Array.isArray(field.value) && field.value.length) return pickText(field.value);\n    if (typeof field.text === 'string') return field.text.trim();\n  }\n  return '';\n}\n\nconst records = [...(first.data?.items || [])];\nlet pageToken = first.data?.page_token || '';\nlet hasMore = Boolean(first.data?.has_more);\n\nwhile (hasMore && pageToken) {\n  const qs = new URLSearchParams({ page_size: '500', page_token: pageToken });\n  const url = `https://open.feishu.cn/open-apis/bitable/v1/apps/${baseId}/tables/${tableId}/records/search?${qs}`;\n  const resp = await this.helpers.httpRequest({\n    method: 'POST',\n    url,\n    headers: {\n      Authorization: `Bearer ${token}`,\n      'Content-Type': 'application/json',\n    },\n    body: searchBody,\n    json: true,\n  });\n  if (resp.code !== 0) {\n    throw new Error(`供应商表翻页失败: ${resp.msg || JSON.stringify(resp)}`);\n  }\n  records.push(...(resp.data?.items || []));\n  hasMore = Boolean(resp.data?.has_more);\n  pageToken = resp.data?.page_token || '';\n  if (!hasMore) break;\n}\n\nreturn records\n  .filter((r) => r && r.record_id)\n  .map((r) => {\n    const f = r.fields || {};\n    return {\n      json: {\n        record_id: r.record_id,\n        供应商: pickText(f['供应商']),\n        户名: pickText(f['户名']),\n        开户支行: pickText(f['开户支行']),\n        银行名称: pickText(f['银行名称']),\n        类型: pickText(f['类型']) || null,\n        地域: pickText(f['地域']) || null,\n        资质: pickText(f['资质']) || null,\n        fields: {\n          类型: pickText(f['类型']),\n          地域: pickText(f['地域']),\n          资质: pickText(f['资质']),\n        },\n      },\n    };\n  });\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000004",
+      "name": "分页展开全部记录"
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        940,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000005",
+      "name": "分批10条"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all().map((i) => i.json).filter((j) => j && j.record_id);\nconst batch = items.map((j, index) => ({\n  index,\n  record_id: j.record_id,\n  供应商: j.供应商 || '',\n  户名: j.户名 || '',\n  开户支行: j.开户支行 || '',\n  银行名称: j.银行名称 || '',\n  类型: j.类型,\n  地域: j.地域,\n  资质: j.资质,\n  fields: j.fields || {\n    类型: j.类型 || '',\n    地域: j.地域 || '',\n    资质: j.资质 || '',\n  },\n}));\n\n// AI 输入不含 record_id，按 index 对齐\nconst aiPayload = batch.map((b) => ({\n  index: b.index,\n  供应商: b.供应商,\n  户名: b.户名,\n  开户支行: b.开户支行,\n  银行名称: b.银行名称,\n  类型: b.类型,\n  地域: b.地域,\n  资质: b.资质,\n}));\n\nreturn [{\n  json: {\n    batch,\n    batch_size: batch.length,\n    ai_prompt: JSON.stringify(aiPayload, null, 2),\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        400
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000006",
+      "name": "组装AI输入"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.ai_prompt }}",
+        "options": {
+          "systemMessage": "你是供应商分类助手。输入是按 index 排序的供应商数组。请按相同顺序返回 JSON 数组（长度必须一致）。\n\n规则：\n1. 只输出 JSON 数组，不要 markdown，不要解释。\n2. 不要输出 record_id；用数组下标与输入 index 一一对应。\n3. 已有非 null 的类型/地域/资质仍可给建议，下游会只填空。\n4. 类型必须从：酒店、民宿、其它、车队、景区 (基地)、餐厅、客户退款、地接、导游、内部、广告搭建\n5. 资质必须从：旅行社、其他、餐饮、个人\n6. 地域优先：舟山、安吉、德清、嘉兴、金华、苏州、桐庐、上海崇明区、上海奉贤区、上海青浦区、千岛湖、杭州、湖州、上海、绍兴；对不上可写自定义地名。\n7. 不确定时仍选最接近项，字段名放入 low_confidence；自定义地域必须放入 low_confidence。\n\n输出格式：\n[{\"类型\":\"酒店\",\"地域\":\"杭州\",\"资质\":\"其他\",\"low_confidence\":[],\"reason\":\"短句\"}]"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        1420,
+        400
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000007",
+      "name": "DeepSeek Agent_供应商分类"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-v4-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        620
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000008",
+      "name": "DeepSeek Chat Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "PyhZGcLIC7RuJz4H",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const prep = $('组装AI输入').first().json;\nconst batch = prep.batch || [];\n\nconst TYPE_NORMALIZE = { '景区（基地）': '景区 (基地)', '景区 (基地)': '景区 (基地)' };\nconst TYPE_WHITELIST = new Set(['酒店','民宿','其它','车队','景区 (基地)','景区（基地）','餐厅','客户退款','地接','导游','内部','广告搭建']);\nconst QUAL_WHITELIST = new Set(['旅行社','其他','餐饮','个人']);\nconst REGION_PREFERRED = new Set(['舟山','安吉','德清','嘉兴','金华','苏州','桐庐','上海崇明区','上海奉贤区','上海青浦区','千岛湖','杭州','湖州','上海','绍兴']);\n\nfunction pickText(field) {\n  if (field == null) return '';\n  if (typeof field === 'string') return field.trim();\n  if (typeof field === 'number') return String(field);\n  if (Array.isArray(field)) {\n    if (!field.length) return '';\n    const first = field[0];\n    if (typeof first === 'string') return first.trim();\n    if (first && typeof first.text === 'string') return first.text.trim();\n    return pickText(first);\n  }\n  if (typeof field === 'object') {\n    if (Array.isArray(field.value) && field.value.length) return pickText(field.value);\n    if (typeof field.text === 'string') return field.text.trim();\n  }\n  return '';\n}\n\nfunction normalizeType(value) {\n  const v = String(value || '').trim();\n  if (!v) return '';\n  if (TYPE_NORMALIZE[v]) return TYPE_NORMALIZE[v];\n  return TYPE_WHITELIST.has(v) ? v : '';\n}\nfunction normalizeQual(value) {\n  const v = String(value || '').trim();\n  return QUAL_WHITELIST.has(v) ? v : '';\n}\nfunction normalizeRegion(value) {\n  return String(value || '').trim();\n}\n\nfunction buildUpdateForRecord(existing, ai) {\n  const curType = pickText(existing['类型']);\n  const curRegion = pickText(existing['地域']);\n  const curQual = pickText(existing['资质']);\n  const fields = {};\n  const reviewParts = [];\n  const reasons = [];\n  const low = new Set(Array.isArray(ai.low_confidence) ? ai.low_confidence.map((x) => String(x).trim()).filter(Boolean) : []);\n\n  if (!curType) {\n    const t = normalizeType(ai['类型']);\n    if (t) { fields['类型'] = t; if (low.has('类型')) reviewParts.push('类型'); }\n    else { reasons.push('类型无法写入'); reviewParts.push('类型'); }\n  }\n  if (!curRegion) {\n    const r = normalizeRegion(ai['地域']);\n    if (r) { fields['地域'] = r; if (low.has('地域') || !REGION_PREFERRED.has(r)) reviewParts.push('地域'); }\n    else { reasons.push('地域为空'); reviewParts.push('地域'); }\n  }\n  if (!curQual) {\n    const q = normalizeQual(ai['资质']);\n    if (q) { fields['资质'] = q; if (low.has('资质')) reviewParts.push('资质'); }\n    else { reasons.push('资质无法写入'); reviewParts.push('资质'); }\n  }\n\n  const uniqueReview = [...new Set(reviewParts)];\n  const aiMark = uniqueReview.length ? `AI 待核：${uniqueReview.join('/')}` : null;\n  if (aiMark) fields['AI 标记'] = aiMark;\n  const hasBusiness = fields['类型'] != null || fields['地域'] != null || fields['资质'] != null;\n  return { fields, aiMark, skipped: !hasBusiness && !aiMark, reasons };\n}\n\nfunction parseAiBatch(raw) {\n  const text = String(raw ?? '').replace(/```json/gi, '').replace(/```/g, '').trim();\n  const start = text.indexOf('[');\n  const end = text.lastIndexOf(']');\n  if (start < 0 || end <= start) throw new Error('AI 输出不是 JSON 数组');\n  const data = JSON.parse(text.slice(start, end + 1));\n  if (!Array.isArray(data)) throw new Error('AI 输出根节点不是数组');\n  return data;\n}\n\nconst raw = $json.output ?? $json.text ?? $json.response ?? '';\nlet aiItems = [];\nconst errors = [];\ntry {\n  aiItems = parseAiBatch(raw);\n} catch (e) {\n  return [{\n    json: {\n      has_updates: false,\n      updates: [],\n      errors: [{ error: String(e.message || e) }],\n      raw: String(raw).slice(0, 2000),\n    },\n  }];\n}\n\nconst updates = [];\nfor (let i = 0; i < batch.length; i += 1) {\n  const rec = batch[i];\n  const ai = aiItems[i];\n  if (!ai || typeof ai !== 'object') {\n    errors.push({ record_id: rec.record_id, index: i, error: 'AI 未返回该下标结果' });\n    continue;\n  }\n  const result = buildUpdateForRecord(rec.fields || {}, ai);\n  if (result.skipped) {\n    errors.push({ record_id: rec.record_id, index: i, error: '无可写字段', reasons: result.reasons });\n    continue;\n  }\n  // record_id 只来自原 item\n  updates.push({\n    record_id: rec.record_id,\n    fields: result.fields,\n  });\n}\n\nif (aiItems.length !== batch.length) {\n  errors.push({ error: `AI 条数 ${aiItems.length} 与本批 ${batch.length} 不一致` });\n}\n\nreturn [{\n  json: {\n    has_updates: updates.length > 0,\n    updates,\n    update_count: updates.length,\n    errors,\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        400
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000009",
+      "name": "准备飞书写入数据"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-updates-001",
+              "leftValue": "={{ $json.has_updates }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1900,
+        400
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000010",
+      "name": "是否需要回写"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID || 'Y2ZgbUGWqa0MB4sLmXxc89T5n0P' }}/tables/tbl4vQ8kft1XXSLv/records/batch_update",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('获取飞书Token').item.json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"records\": {{ JSON.stringify($json.updates) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2140,
+        300
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000011",
+      "name": "批量回写飞书",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2380,
+        400
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000012",
+      "name": "批间等待1秒",
+      "webhookId": "supplier-ai-fill-wait-001"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1",
+              "name": "message",
+              "value": "全部批次处理完成",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1180,
+        200
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000013",
+      "name": "结束_全部完成"
+    },
+    {
+      "parameters": {
+        "content": "## 供应商 AI 补全\n\n- 视图全量拉取（不过滤），每批 10 条\n- record_id 来自 item，不用 AI\n- Code 只组装 updates；HTTP POST batch_update 回写\n- 只填空；低置信 → AI 标记\n- 文档：供应商AI补全工作流.md",
+        "height": 340,
+        "width": 460
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -40,
+        40
+      ],
+      "id": "b2000001-sup1-4aa1-8b01-000000000014",
+      "name": "说明"
+    }
+  ],
+  "connections": {
+    "手动触发": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "查询供应商视图首页",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询供应商视图首页": {
+      "main": [
+        [
+          {
+            "node": "分页展开全部记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "分页展开全部记录": {
+      "main": [
+        [
+          {
+            "node": "分批10条",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "分批10条": {
+      "main": [
+        [
+          {
+            "node": "结束_全部完成",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "组装AI输入",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "组装AI输入": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek Agent_供应商分类",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "DeepSeek Agent_供应商分类",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Agent_供应商分类": {
+      "main": [
+        [
+          {
+            "node": "准备飞书写入数据",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备飞书写入数据": {
+      "main": [
+        [
+          {
+            "node": "是否需要回写",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "是否需要回写": {
+      "main": [
+        [
+          {
+            "node": "批量回写飞书",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "批间等待1秒",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "批量回写飞书": {
+      "main": [
+        [
+          {
+            "node": "批间等待1秒",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "批间等待1秒": {
+      "main": [
+        [
+          {
+            "node": "分批10条",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "pinData": {}
+}

@@ -70,12 +70,14 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       策划师: "{策划师}"
     sheet:
       start_row: 2
-      max_rows: 20
-      clear_unused_rows: true
+      max_rows: 50
+      clear_unused_rows: false
+      trim_unused_rows: true
+      template_data_rows: 20
       columns:
         - field: 名称
           col: A
-        - field: 内容
+        - field: 描述
           col: B
         - field: 数量
           col: C
@@ -85,7 +87,14 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
           col: F
         - field: 联系人
           col: G
-      # E 列为小计公式、总价行不写，保留模板 SUM
+      # E 列小计 + 总价行由服务按实际行数写入公式，再删除模板多余空行
+      formula:
+        subtotal_col: E
+        subtotal: '=IF(C{row}="","",C{row}*D{row})'
+        total_label_col: A
+        total_label: 总价
+        total_col: E
+        total: '=SUM(E{start}:E{end})'
 
 signing_unit_map:
   杭州趣加旅行社服务有限公司: 趣加旅社

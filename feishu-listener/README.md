@@ -6,7 +6,7 @@
 
 | 应用 | 环境变量 | 事件 | 进程 |
 | --- | --- | --- | --- |
-| 主应用（n8n） | `FEISHU_APP_ID` / `SECRET` | bitable 变更 | 主进程线程内 `lark.ws.Client` |
+| 主应用（n8n） | `FEISHU_APP_ID` / `SECRET` | bitable 变更；`im.message.receive_v1`（群内 n8n 机器人，如发票税务校验） | 主进程线程内 `lark.ws.Client` |
 | 对话应用（feishu-bot） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1` | 子进程 `chat_ws.py` → `POST /internal/ingest` |
 
 同一进程无法跑两个 lark WS Client（asyncio 冲突），故对话应用使用子进程。健康检查字段：`ws_status`、`chat_ws_status`、`chat_ws_pid`。
@@ -232,12 +232,14 @@ routes:
 retention:
   max_days: 7
   max_events: 5000
-  vacuum_after_cleanup: true
+  vacuum_after_cleanup: false  # 默认关闭；VACUUM 会重写整库，勿在高峰/频繁 recreate 时开启
 
 storage:
   ignored_raw_mode: summary   # 未匹配事件只存摘要，省空间
   matched_raw_mode: full      # 命中事件存完整 raw
 ```
+
+事件库使用 SQLite WAL。`POST /admin/cleanup` 与 `/admin/compact-ignored` 仅在配置了 `vacuum_after_cleanup: true` 时才会 `VACUUM`；需要压缩体积时请在低峰、写入较少时手动开启并执行。
 
 ## Web UI 与 SSH 隧道访问
 
@@ -277,8 +279,8 @@ UI 功能：概览统计、只读路由列表、最近事件（默认最多保�
 | `GET` | `/events/{id}` | 事件详情 |
 | `GET` | `/stats` | 统计信息 |
 | `GET` | `/ui` | Web UI |
-| `POST` | `/admin/cleanup` | 手动清理旧事件 |
-| `POST` | `/admin/compact-ignored` | 压缩 ignored 事件的 raw |
+| `POST` | `/admin/cleanup` | 手动清理旧事件（默认不 VACUUM） |
+| `POST` | `/admin/compact-ignored` | 压缩 ignored 事件的 raw（默认不 VACUUM） |
 | `POST` | `/debug/normalize` | 调试标准化（生产建议 `ENABLE_DEBUG_ENDPOINTS=false`） |
 
 事件数据库路径：`feishu-listener/data/events.sqlite`。

@@ -212,13 +212,17 @@ aliases:
   店名: supplier_name
   户名: account_name
   账户名: account_name
+  账户名称: account_name
+  账户: account_name
   开户名: account_name
+  公司名称: account_name
   账号: account_no
   卡号: account_no
   银行账号: account_no
   银行: bank_name
   银行名称: bank_name
   开户行: bank_name
+  开户银行: bank_name
   开户支行: branch
   支行: branch
   联系方式: contact

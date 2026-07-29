@@ -7,6 +7,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 SHEET_BLOCK_TYPE = 30
 
+DEFAULT_SUBTOTAL_FORMULA = '=IF(C{row}="","",C{row}*D{row})'
+DEFAULT_TOTAL_FORMULA = "=SUM(E{start}:E{end})"
+
 
 class SheetConfigError(Exception):
     """Invalid sheet token or sheet write configuration."""
@@ -68,10 +71,17 @@ def _cell_value(row: Dict[str, Any], field: str) -> Any:
         value = row[field]
     else:
         value = None
-        for key, candidate in row.items():
-            if str(key).strip() == field:
-                value = candidate
+        # Compat: 内容 ↔ 描述 (config vs n8n sheet_rows)
+        aliases = {"内容": ("描述",), "描述": ("内容",)}
+        for alt in aliases.get(field, ()):
+            if alt in row:
+                value = row[alt]
                 break
+        if value is None:
+            for key, candidate in row.items():
+                if str(key).strip() == field:
+                    value = candidate
+                    break
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -93,6 +103,10 @@ def _cell_value(row: Dict[str, Any], field: str) -> Any:
     return text
 
 
+def _formula_cell(text: str) -> Dict[str, str]:
+    return {"type": "formula", "text": text}
+
+
 def build_sheet_value_ranges(
     sheet_id: str,
     sheet_cfg: Dict[str, Any],
@@ -102,6 +116,9 @@ def build_sheet_value_ranges(
 
     Non-contiguous columns (e.g. A-D then F-G, skipping formula col E)
     are emitted as separate contiguous ranges so formulas are preserved.
+
+    When trim_unused_rows is enabled (default True with formula/trim config),
+    only write len(rows) data rows — empty padding is deleted afterward.
     """
     if not sheet_id:
         raise SheetConfigError("sheet_id is required", error_code="MISSING_SHEET_ID")
@@ -115,7 +132,12 @@ def build_sheet_value_ranges(
 
     start_row = int(sheet_cfg.get("start_row") or 2)
     max_rows = int(sheet_cfg.get("max_rows") or 20)
-    clear_unused = bool(sheet_cfg.get("clear_unused_rows", True))
+    trim_unused = bool(sheet_cfg.get("trim_unused_rows", False))
+    # When trimming, never pad to max_rows; otherwise honor clear_unused_rows.
+    if trim_unused:
+        clear_unused = False
+    else:
+        clear_unused = bool(sheet_cfg.get("clear_unused_rows", True))
 
     if len(rows) > max_rows:
         raise SheetConfigError(
@@ -170,6 +192,116 @@ def build_sheet_value_ranges(
         run_start = run_end + 1
 
     return ranges
+
+
+def build_formula_ranges(
+    sheet_id: str,
+    sheet_cfg: Dict[str, Any],
+    row_count: int,
+) -> List[Dict[str, Any]]:
+    """Build formula valueRanges for subtotal column + total row.
+
+    Returns empty list when formula config is absent or row_count is 0.
+    """
+    if not sheet_id or row_count <= 0:
+        return []
+
+    formula_cfg = sheet_cfg.get("formula")
+    if not isinstance(formula_cfg, dict) or not formula_cfg:
+        return []
+
+    start_row = int(sheet_cfg.get("start_row") or 2)
+    end_data_row = start_row + row_count - 1
+    total_row = end_data_row + 1
+
+    subtotal_col = str(formula_cfg.get("subtotal_col") or "E").strip().upper()
+    subtotal_tpl = str(formula_cfg.get("subtotal") or DEFAULT_SUBTOTAL_FORMULA)
+    total_col = str(formula_cfg.get("total_col") or "E").strip().upper()
+    total_tpl = str(formula_cfg.get("total") or DEFAULT_TOTAL_FORMULA)
+    total_label_col = str(formula_cfg.get("total_label_col") or "A").strip().upper()
+    total_label = str(formula_cfg.get("total_label") or "总价")
+
+    subtotal_values: List[List[Any]] = []
+    for r in range(start_row, end_data_row + 1):
+        text = subtotal_tpl.format(row=r, start=start_row, end=end_data_row)
+        subtotal_values.append([_formula_cell(text)])
+
+    ranges: List[Dict[str, Any]] = [
+        {
+            "range": f"{sheet_id}!{subtotal_col}{start_row}:{subtotal_col}{end_data_row}",
+            "values": subtotal_values,
+        }
+    ]
+
+    total_formula = total_tpl.format(row=total_row, start=start_row, end=end_data_row)
+    # Write label and total formula; clear leftover template cells on the total row
+    if total_label_col == total_col:
+        ranges.append(
+            {
+                "range": f"{sheet_id}!{total_col}{total_row}:{total_col}{total_row}",
+                "values": [[_formula_cell(total_formula)]],
+            }
+        )
+    else:
+        ranges.append(
+            {
+                "range": f"{sheet_id}!{total_label_col}{total_row}:{total_label_col}{total_row}",
+                "values": [[total_label]],
+            }
+        )
+        ranges.append(
+            {
+                "range": f"{sheet_id}!{total_col}{total_row}:{total_col}{total_row}",
+                "values": [[_formula_cell(total_formula)]],
+            }
+        )
+
+    # Clear B–D / F–G on total row so template sample cells do not linger
+    clear_cols = [
+        c
+        for c in ("B", "C", "D", "F", "G")
+        if c not in {total_label_col, total_col, subtotal_col}
+    ]
+    for col in clear_cols:
+        ranges.append(
+            {
+                "range": f"{sheet_id}!{col}{total_row}:{col}{total_row}",
+                "values": [[""]],
+            }
+        )
+
+    return ranges
+
+
+def unused_row_delete_range(
+    sheet_cfg: Dict[str, Any],
+    row_count: int,
+) -> Optional[Tuple[int, int]]:
+    """Return 1-based inclusive (startIndex, endIndex) of rows to delete.
+
+    Deletes from the row after the total row through the template's reserved
+    end (data rows + original total row). Returns None when nothing to delete.
+    """
+    if not bool(sheet_cfg.get("trim_unused_rows", False)):
+        return None
+    if row_count <= 0:
+        return None
+
+    start_row = int(sheet_cfg.get("start_row") or 2)
+    template_data_rows = int(
+        sheet_cfg.get("template_data_rows")
+        or sheet_cfg.get("max_rows")
+        or 20
+    )
+    # After write: data occupies start_row .. start_row+N-1, total at start_row+N
+    total_row = start_row + row_count
+    # Template reserved: data rows start_row .. start_row+template_data_rows-1,
+    # plus original total typically at start_row+template_data_rows
+    template_end = start_row + template_data_rows  # inclusive old total row
+    delete_start = total_row + 1
+    if delete_start > template_end:
+        return None
+    return (delete_start, template_end)
 
 
 def resolve_sheet_rows(

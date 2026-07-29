@@ -6,10 +6,12 @@ import unittest
 
 from sheet_filler import (
     SheetConfigError,
+    build_formula_ranges,
     build_sheet_value_ranges,
     find_sheet_refs,
     parse_sheet_token,
     resolve_sheet_rows,
+    unused_row_delete_range,
 )
 
 
@@ -70,6 +72,40 @@ class BuildValueRangesTests(unittest.TestCase):
         self.assertEqual(values[2], ["", "", "", ""])
         self.assertEqual(len(values), 5)
 
+    def test_trim_writes_only_actual_rows(self):
+        sheet_cfg = {
+            "start_row": 2,
+            "max_rows": 20,
+            "trim_unused_rows": True,
+            "clear_unused_rows": True,  # ignored when trim is on
+            "columns": [
+                {"field": "名称", "col": "A"},
+                {"field": "描述", "col": "B"},
+                {"field": "数量", "col": "C"},
+                {"field": "单价", "col": "D"},
+            ],
+        }
+        rows = [
+            {"名称": "大巴", "描述": "接送", "数量": 1, "单价": 100},
+            {"名称": "保险", "描述": "意外", "数量": 10, "单价": 5},
+        ]
+        ranges = build_sheet_value_ranges("sht", sheet_cfg, rows)
+        self.assertEqual(ranges[0]["range"], "sht!A2:D3")
+        self.assertEqual(len(ranges[0]["values"]), 2)
+
+    def test_content_alias_maps_to_desc(self):
+        sheet_cfg = {
+            "start_row": 2,
+            "max_rows": 5,
+            "trim_unused_rows": True,
+            "columns": [
+                {"field": "内容", "col": "B"},
+            ],
+        }
+        rows = [{"描述": "接送说明"}]
+        ranges = build_sheet_value_ranges("sht", sheet_cfg, rows)
+        self.assertEqual(ranges[0]["values"][0], ["接送说明"])
+
     def test_contiguous_groups_skip_e(self):
         sheet_cfg = {
             "start_row": 2,
@@ -103,6 +139,77 @@ class BuildValueRangesTests(unittest.TestCase):
                 sheet_cfg,
                 [{"数量": 1}, {"数量": 2}],
             )
+
+
+class BuildFormulaRangesTests(unittest.TestCase):
+    def test_subtotal_and_total(self):
+        sheet_cfg = {
+            "start_row": 2,
+            "formula": {
+                "subtotal_col": "E",
+                "subtotal": '=IF(C{row}="","",C{row}*D{row})',
+                "total_label_col": "A",
+                "total_label": "总价",
+                "total_col": "E",
+                "total": "=SUM(E{start}:E{end})",
+            },
+        }
+        ranges = build_formula_ranges("sht", sheet_cfg, row_count=3)
+        self.assertGreaterEqual(len(ranges), 3)
+        self.assertEqual(ranges[0]["range"], "sht!E2:E4")
+        self.assertEqual(
+            ranges[0]["values"][0],
+            [{"type": "formula", "text": '=IF(C2="","",C2*D2)'}],
+        )
+        self.assertEqual(
+            ranges[0]["values"][2],
+            [{"type": "formula", "text": '=IF(C4="","",C4*D4)'}],
+        )
+        self.assertEqual(ranges[1]["range"], "sht!A5:A5")
+        self.assertEqual(ranges[1]["values"][0], ["总价"])
+        self.assertEqual(ranges[2]["range"], "sht!E5:E5")
+        self.assertEqual(
+            ranges[2]["values"][0],
+            [{"type": "formula", "text": "=SUM(E2:E4)"}],
+        )
+        # leftover template cells on total row cleared
+        clear_ranges = {r["range"] for r in ranges[3:]}
+        self.assertTrue({"sht!B5:B5", "sht!C5:C5", "sht!D5:D5", "sht!F5:F5", "sht!G5:G5"} <= clear_ranges)
+
+    def test_no_formula_config_returns_empty(self):
+        self.assertEqual(build_formula_ranges("sht", {"start_row": 2}, 3), [])
+        self.assertEqual(
+            build_formula_ranges("sht", {"start_row": 2, "formula": {}}, 0),
+            [],
+        )
+
+
+class UnusedRowDeleteRangeTests(unittest.TestCase):
+    def test_delete_after_total(self):
+        sheet_cfg = {
+            "start_row": 2,
+            "trim_unused_rows": True,
+            "template_data_rows": 20,
+        }
+        # 3 data rows → total at row 5; delete 6..22
+        self.assertEqual(unused_row_delete_range(sheet_cfg, 3), (6, 22))
+
+    def test_full_template_no_delete(self):
+        sheet_cfg = {
+            "start_row": 2,
+            "trim_unused_rows": True,
+            "template_data_rows": 3,
+        }
+        # 3 data → total at 5; template_end = 2+3=5 → nothing after total
+        self.assertIsNone(unused_row_delete_range(sheet_cfg, 3))
+
+    def test_disabled(self):
+        self.assertIsNone(
+            unused_row_delete_range(
+                {"start_row": 2, "trim_unused_rows": False, "template_data_rows": 20},
+                3,
+            )
+        )
 
 
 class ResolveSheetRowsTests(unittest.TestCase):

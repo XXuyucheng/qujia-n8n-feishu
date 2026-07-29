@@ -53,8 +53,13 @@ class EventStore:
         self.init()
 
     def connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        # WAL survives abrupt container kills better than rollback journal;
+        # avoid VACUUM-on-every-cleanup which rewrites the whole file under load.
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         return conn
 
     def init(self) -> None:
@@ -190,12 +195,21 @@ class EventStore:
         dispatch_enabled: bool,
         raw_mode: str,
         error: Optional[str] = None,
-    ) -> int:
+    ) -> Optional[int]:
+        """Insert event. Returns None if event_id already exists (Feishu redelivery)."""
         now = datetime.now(timezone.utc).isoformat()
         resource = normalized.get("resource") or {}
         deletion = extract_deletion_info(normalized.get("raw") or raw)
         deleted_by = deletion.get("deleted_by") or {}
+        eid = str(normalized.get("event_id") or "").strip()
         with self._lock, self.connect() as conn:
+            if eid:
+                exists = conn.execute(
+                    "select 1 from events where event_id = ? limit 1",
+                    (eid,),
+                ).fetchone()
+                if exists is not None:
+                    return None
             cur = conn.execute(
                 """
                 insert into events (
@@ -567,7 +581,7 @@ class EventStore:
     def cleanup(self, retention: Dict[str, Any]) -> Dict[str, Any]:
         max_days = int(retention.get("max_days", 7))
         max_events = int(retention.get("max_events", 5000))
-        vacuum = bool(retention.get("vacuum_after_cleanup", True))
+        vacuum = bool(retention.get("vacuum_after_cleanup", False))
         cutoff = (datetime.now(timezone.utc) - timedelta(days=max_days)).isoformat()
 
         with self._lock, self.connect() as conn:
@@ -619,7 +633,7 @@ class EventStore:
             "vacuum": vacuum and bool(deleted_events),
         }
 
-    def compact_ignored_raw(self, vacuum: bool = True) -> Dict[str, Any]:
+    def compact_ignored_raw(self, vacuum: bool = False) -> Dict[str, Any]:
         converted = 0
         with self._lock, self.connect() as conn:
             rows = conn.execute(
@@ -668,7 +682,8 @@ def load_config() -> Dict[str, Any]:
     data.setdefault("retention", {})
     data["retention"].setdefault("max_days", 7)
     data["retention"].setdefault("max_events", 5000)
-    data["retention"].setdefault("vacuum_after_cleanup", True)
+    # Default off: VACUUM rewrites the whole DB and is unsafe under Docker recreate.
+    data["retention"].setdefault("vacuum_after_cleanup", False)
     data.setdefault("storage", {})
     data["storage"].setdefault("ignored_raw_mode", "summary")
     data["storage"].setdefault("matched_raw_mode", "full")
@@ -1777,6 +1792,8 @@ def maybe_cleanup(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def process_event(raw_input: Any) -> Dict[str, Any]:
     raw = as_dict(raw_input)
     normalized = normalize_event(raw)
+    event_id = str(normalized.get("event_id") or "").strip()
+
     config = load_config()
     route = find_route(normalized, config.get("routes", []))
     route_name = route.get("name") if route else None
@@ -1789,6 +1806,8 @@ def process_event(raw_input: Any) -> Dict[str, Any]:
             status = "dispatching"
 
     raw_payload, raw_mode = choose_raw_payload(raw, normalized, status, config)
+    # Deduplicate Feishu redeliveries of the same event_id (common when the
+    # WS handler previously blocked on a slow n8n webhook before ACKing).
     event_row_id = store.insert_event(
         normalized=normalized,
         raw=raw_payload,
@@ -1797,15 +1816,37 @@ def process_event(raw_input: Any) -> Dict[str, Any]:
         dispatch_enabled=dispatch_enabled,
         raw_mode=raw_mode,
     )
+    if event_row_id is None:
+        logger.info(
+            "duplicate event skipped event_id=%s event_type=%s",
+            event_id,
+            normalized.get("event_type"),
+        )
+        return {
+            "event_row_id": None,
+            "status": "duplicate",
+            "route_name": route_name,
+            "dispatch_enabled": False,
+            "cleanup": None,
+            "normalized": normalized,
+        }
 
     state["last_event_at"] = datetime.now(timezone.utc).isoformat()
 
     if route and dispatch_enabled:
-        try:
-            dispatch_to_n8n(store, event_row_id, route, normalized)
-        except Exception as exc:
-            state["last_error"] = str(exc)
-            logger.exception("dispatch failed")
+        # Return from WS handler ASAP so Feishu ACKs the event; dispatch in background.
+        def _bg_dispatch() -> None:
+            try:
+                dispatch_to_n8n(store, event_row_id, route, normalized)
+            except Exception as exc:
+                state["last_error"] = str(exc)
+                logger.exception("dispatch failed event_id=%s", event_id)
+
+        threading.Thread(
+            target=_bg_dispatch,
+            name=f"dispatch-{route_name or 'route'}-{event_row_id}",
+            daemon=True,
+        ).start()
 
     logger.info(
         "event processed event_id=%s event_type=%s route=%s status=%s",
@@ -1835,6 +1876,10 @@ def build_lark_event_handler() -> Any:
     def handle_custom_event(data: Any) -> None:
         process_event(data)
 
+    def handle_im_message(data: Any) -> None:
+        # Main app (n8n) may also receive IM in groups where it is the bot.
+        process_event(data)
+
     builder = lark.EventDispatcherHandler.builder(verification_token, encrypt_key)
     builder = builder.register_p2_customized_event(
         "drive.file.bitable_record_changed_v1",
@@ -1844,6 +1889,7 @@ def build_lark_event_handler() -> Any:
         "drive.file.bitable_record_changed_v1",
         handle_custom_event,
     )
+    builder = builder.register_p2_im_message_receive_v1(handle_im_message)
     return builder.build()
 
 
@@ -2099,7 +2145,7 @@ def admin_cleanup() -> Dict[str, Any]:
 @app.post("/admin/compact-ignored")
 def admin_compact_ignored() -> Dict[str, Any]:
     config = load_config()
-    vacuum = bool(config.get("retention", {}).get("vacuum_after_cleanup", True))
+    vacuum = bool(config.get("retention", {}).get("vacuum_after_cleanup", False))
     return store.compact_ignored_raw(vacuum=vacuum)
 
 

@@ -33,9 +33,11 @@ from models import (
 )
 from sheet_filler import (
     SheetConfigError,
+    build_formula_ranges,
     build_sheet_value_ranges,
     find_sheet_refs,
     resolve_sheet_rows,
+    unused_row_delete_range,
 )
 
 CONFIG_PATH = Path(os.getenv("FEISHU_FILES_GENERATION_CONFIG_PATH", "/app/config.yaml"))
@@ -245,6 +247,12 @@ def api_generate(req: GenerateRequest) -> Any:
                     tpl.sheet,
                     sheet_rows,
                 )
+                formula_ranges = build_formula_ranges(
+                    ref["sheet_id"],
+                    tpl.sheet,
+                    len(sheet_rows),
+                )
+                delete_range = unused_row_delete_range(tpl.sheet, len(sheet_rows))
             except SheetConfigError as exc:
                 return _error_response(
                     error_code=exc.error_code,
@@ -260,6 +268,23 @@ def api_generate(req: GenerateRequest) -> Any:
                 sheet_rows_written = min(
                     len(sheet_rows),
                     int(tpl.sheet.get("max_rows") or len(sheet_rows)),
+                )
+            # Write subtotal + total formulas after data values
+            if formula_ranges:
+                client.values_batch_update(
+                    token,
+                    ref["spreadsheet_token"],
+                    formula_ranges,
+                )
+            # Drop template padding rows below the new total row
+            if delete_range is not None:
+                del_start, del_end = delete_range
+                client.delete_dimension_range(
+                    token,
+                    ref["spreadsheet_token"],
+                    ref["sheet_id"],
+                    del_start,
+                    del_end,
                 )
             if len(sheet_refs) > 1:
                 warnings.append(

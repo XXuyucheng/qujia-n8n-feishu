@@ -401,7 +401,7 @@ class AppIdAndImNormalizeTests(unittest.TestCase):
             "header": {
                 "event_id": "im-tax-001",
                 "event_type": "im.message.receive_v1",
-                "app_id": "cli_a940966ee8385bd7",
+                "app_id": "cli_a94bb777f63a5bce",
             },
             "event": {
                 "sender": {"sender_type": "user", "sender_id": {"open_id": "ou_x"}},
@@ -432,7 +432,7 @@ class AppIdAndImNormalizeTests(unittest.TestCase):
         route_ok = {
             "enabled": True,
             "event_type": "im.message.receive_v1",
-            "app_id": "cli_a940966ee8385bd7",
+            "app_id": "cli_a94bb777f63a5bce",
             "chat_id": "oc_546b26752d3d6763463f81344c7e77ef",
             "text_contains": "发票号校验",
         }
@@ -441,9 +441,14 @@ class AppIdAndImNormalizeTests(unittest.TestCase):
             **route_ok,
             "chat_id": "oc_other",
         }
+        route_miss_app = {
+            **route_ok,
+            "app_id": "cli_a940966ee8385bd7",
+        }
         self.assertTrue(route_matches(route_ok, event))
         self.assertFalse(route_matches(route_miss_text, event))
         self.assertFalse(route_matches(route_miss_chat, event))
+        self.assertFalse(route_matches(route_miss_app, event))
 
 
 if __name__ == "__main__":

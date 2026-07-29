@@ -305,3 +305,53 @@ class FeishuClient:
             data = self._parse_json(resp)
         self._raise_for_code(data, action="values_batch_update")
         return data.get("data") or {}
+
+    def delete_dimension_range(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        start_index: int,
+        end_index: int,
+        *,
+        major_dimension: str = "ROWS",
+    ) -> Dict[str, Any]:
+        """Delete rows or columns via Sheets dimension_range API.
+
+        Indexes are 1-based inclusive (Feishu convention).
+        """
+        if start_index < 1 or end_index < start_index:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/dimension_range"
+        )
+        body = {
+            "dimension": {
+                "sheetId": sheet_id,
+                "majorDimension": major_dimension,
+                "startIndex": start_index,
+                "endIndex": end_index,
+            }
+        }
+        self._throttle("write")
+        resp = self._client.request(
+            "DELETE",
+            url,
+            headers=self._headers(token),
+            json=body,
+        )
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.request(
+                "DELETE",
+                url,
+                headers=self._headers(token),
+                json=body,
+            )
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="delete_dimension_range")
+        return data.get("data") or {}

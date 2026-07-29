@@ -20,7 +20,7 @@
 2. `docx/v1/documents/{id}/blocks/{id}/children?with_descendants=true` — 拉取整棵块树
 3. 在每个含 `text.elements[].text_run` 的块里，用正则替换 `{{key}}`
 4. `docx/v1/documents/{id}/blocks/batch_update` — 分批写回（保留 `text_element_style`）
-5. （出团计划单）定位 `block_type=30` Sheet 块，拆分 `sheet.token` → `Sheets values_batch_update` 写入数量等列，**不覆盖小计/总价公式列**
+5. （出团计划单）定位 `block_type=30` Sheet 块，拆分 `sheet.token` → `Sheets values_batch_update` 写入明细列；再写入小计/总价公式；最后 `dimension_range` 删除模板多余空行
 
 ```text
 curl / n8n
@@ -35,7 +35,7 @@ POST /api/generate
     ├─ list_all_blocks
     ├─ block_filler.build_update_requests
     ├─ batch_update（每批 ≤20，间隔 ≥350ms）
-    └─ sheet_filler + values_batch_update（可选）
+    └─ sheet_filler：values_batch_update（数据）→ 写公式 → delete_dimension_range（可选）
     │
     ▼
 { document_url, replaced_blocks, sheet_rows_written, unresolved_placeholders }
@@ -48,8 +48,9 @@ flowchart LR
   values --> copy[drive_files_copy]
   copy --> blocks[list_all_blocks]
   blocks --> fill[replace_in_block]
-  fill --> batch[batch_update]
-  batch --> resp[document_url]
+  fill --> sheetWrite[sheet_values_and_formulas]
+  sheetWrite --> trim[delete_unused_rows]
+  trim --> resp[document_url]
 ```
 
 ### 两种入参模式
@@ -263,7 +264,7 @@ export FOLDER_TOKEN=fldcnXXXXXXXX
 
 ### 4b. 出团计划单（含内嵌 Sheet）
 
-1. 按 [出团计划单模板.md](../出团计划单模板.md) 建好飞书模板（文本 `{{}}` + 预定结算 Sheet，小计/总价用公式）
+1. 按 [出团计划单模板.md](../出团计划单模板.md) 建好飞书模板（文本 `{{}}` + 预定结算 Sheet；可预留数据行，生成时由服务写公式并裁剪空行）
 2. `.env` 配置 `FEISHU_DEPARTURE_TEMPLATE_TOKEN` / `FEISHU_DEPARTURE_OUTPUT_FOLDER`
 3. 应用需额外开通电子表格编辑权限（`sheets:spreadsheet` 或 drive 编辑）
 4. 探测：`/api/probe` 应返回 `sheet_block_count >= 1`
@@ -274,6 +275,8 @@ export FEISHU_TOKEN=t-xxx
 ./scripts/smoke_departure.sh          # dry_run preview
 RUN_LIVE=1 ./scripts/smoke_departure.sh
 ```
+
+生成后预定结算表应为：表头 + N 行明细 + 1 行总价（E 列为公式，无大片空行）。
 
 n8n 工作流：`出团计划单生成`（导出见 `files/departure-plan.workflow.json`），Webhook 路径 `make-departure-plan`。
 
