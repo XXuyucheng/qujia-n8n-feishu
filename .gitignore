@@ -3,28 +3,34 @@
 .env.*
 !.env.example
 
-# n8n runtime data and credentials database
+# n8n runtime data and shared mount (not source)
 n8n-data/
+files/
 
-# Runtime files and logs
-files/tmp/
+# Service runtime / broken backups
 feishu-listener/data/
 feishu-field-parser/data/
+feishu-bot/data/
 backup-broken/
+
+# Databases and logs
 *.sqlite
 *.sqlite-*
 *.db
 *.journal
 *.log
 
-# Python/cache/build artifacts
+# Python / cache / build
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
 venv/
+node_modules/
 
-# OS/editor noise
+# OS / editor
 .DS_Store
 .idea/
 .vscode/
+*.swp
+.cursor/
