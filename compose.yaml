@@ -8,10 +8,13 @@ services:
       - ./n8n-data:/home/node/.n8n
       - ./files:/files
     environment:
-      - N8N_HOST=localhost
+      - N8N_HOST=${N8N_HOST:-localhost}
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
       - N8N_SECURE_COOKIE=false
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-}
+      - N8N_PROXY_HOPS=1
       - TZ=Asia/Shanghai
       - GENERIC_TIMEZONE=Asia/Shanghai
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
@@ -134,4 +137,16 @@ services:
       - VISION_API_URL=${VISION_API_URL:-https://ark.cn-beijing.volces.com/api/v3/responses}
       - VISION_MODEL=${VISION_MODEL:-}
       - LOG_LEVEL=INFO
+    restart: unless-stopped
+
+  nginx:
+    profiles: ["prod"]
+    image: ${NGINX_IMAGE:-docker.1ms.run/library/nginx:1.27-alpine}
+    container_name: n8n-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - n8n
     restart: unless-stopped

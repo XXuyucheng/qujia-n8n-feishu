@@ -1,3 +1,6 @@
+# Local ops runbooks (may contain IPs / machine-specific steps)
+docs/ops/
+
 # Local secrets
 .env
 .env.*
