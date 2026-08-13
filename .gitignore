@@ -1,6 +1,13 @@
 # Local ops runbooks (may contain IPs / machine-specific steps)
 docs/ops/
 
+# Not part of the Compose runtime (kept on disk, not tracked)
+promet/
+workflows/
+workflow-algorithms/
+scripts/
+docs/superpowers/
+
 # Local secrets
 .env
 .env.*

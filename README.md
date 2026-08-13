@@ -20,22 +20,25 @@
 ```text
 compose.yaml          # Docker Compose 栈
 .env.example          # 环境变量模板（复制为 .env）
+deploy/               # 生产 nginx 配置（compose profile=prod）
 pdf-parser/           # PDF 解析服务
 feishu-listener/      # 飞书事件监听
 feishu-field-parser/  # 字段解析
 feishu-files-generation/
 feishu-bot/           # 对话机器人
-scripts/              # 辅助脚本与单测
 ```
 
-本地运行数据（**不入库**）：
+工作流在 n8n 编辑器里维护（数据在 `n8n-data/`）；JSON 导出、设计稿等不入库。
+
+本地运行数据与其它不入库内容：
 
 | 路径 | 说明 |
 | --- | --- |
 | `.env` | 密钥与环境变量 |
-| `n8n-data/` | n8n 数据库、凭据、日志 |
+| `n8n-data/` | n8n 数据库、凭据、日志、工作流 |
 | `files/` | n8n 共享挂载目录（runtime） |
 | `*/data/` | 各服务本地 SQLite 等 |
+| `workflows/`、`promet/` 等 | 本机导出/设计稿，见 `.gitignore` |
 
 ## 本地启动
 
