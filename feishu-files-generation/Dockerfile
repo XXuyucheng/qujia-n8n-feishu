@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY app.py feishu_client.py block_filler.py config_loader.py models.py sheet_filler.py ./
+COPY app.py feishu_client.py block_filler.py config_loader.py models.py sheet_filler.py spreadsheet_filler.py contract_sheet_filler.py ./
 COPY test_*.py ./
 
 EXPOSE 8030

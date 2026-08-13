@@ -53,6 +53,13 @@ class ResolvedTemplate:
     required_placeholders: List[str] = field(default_factory=list)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     sheet: Optional[Dict[str, Any]] = None
+    # "docx" (default, contract / departure) or "spreadsheet" (standalone sheet)
+    template_type: str = "docx"
+    # Append fee/itinerary as embedded Sheet blocks after placeholder fill (contracts)
+    append_detail_sheets: bool = False
+    detail_sheets: Optional[Dict[str, Any]] = None
+    # Alias key from output_folders when resolved via output_folder (may be empty)
+    output_folder: str = ""
     explicit: bool = False
 
 
@@ -96,6 +103,89 @@ def parse_rate_limit(raw: Optional[Dict[str, Any]]) -> RateLimitConfig:
     )
 
 
+def list_output_folders(config: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    """Return alias -> folder_token map from config.output_folders."""
+    config = config or load_config()
+    raw = config.get("output_folders") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(k).strip(): str(v or "").strip()
+        for k, v in raw.items()
+        if str(k).strip() and str(v or "").strip()
+    }
+
+
+def lookup_output_folder_alias(
+    alias: str,
+    config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Resolve output_folders alias to token. Raises UNKNOWN_OUTPUT_FOLDER if missing."""
+    key = str(alias or "").strip()
+    if not key:
+        return ""
+    folders = list_output_folders(config)
+    token = folders.get(key, "")
+    if not token:
+        raise TemplateResolveError(
+            f"Unknown output_folder alias={key!r}; "
+            f"known={sorted(folders.keys())}",
+            error_code="UNKNOWN_OUTPUT_FOLDER",
+        )
+    return token
+
+
+def resolve_folder_token(
+    *,
+    request_folder_token: Optional[str] = None,
+    request_output_folder: Optional[str] = None,
+    template_folder_token: Optional[str] = None,
+    template_output_folder: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """Resolve final folder_token and the alias used (if any).
+
+    Priority (high → low):
+      1. request.folder_token (raw)
+      2. request.output_folder (alias → output_folders)
+      3. template.output_folder (alias) then template.folder_token
+      4. defaults.output_folder / defaults.folder_token
+    """
+    config = config or load_config()
+    defaults = config.get("defaults") or {}
+
+    raw = str(request_folder_token or "").strip()
+    if raw:
+        return raw, ""
+
+    req_alias = str(request_output_folder or "").strip()
+    if req_alias:
+        return lookup_output_folder_alias(req_alias, config), req_alias
+
+    tpl_alias = str(template_output_folder or "").strip()
+    if tpl_alias:
+        return lookup_output_folder_alias(tpl_alias, config), tpl_alias
+
+    tpl_raw = str(template_folder_token or "").strip()
+    if tpl_raw:
+        return tpl_raw, ""
+
+    defaults_alias = str(defaults.get("output_folder") or "").strip()
+    if defaults_alias:
+        return lookup_output_folder_alias(defaults_alias, config), defaults_alias
+
+    defaults_raw = str(defaults.get("folder_token") or "").strip()
+    return defaults_raw, ""
+
+
+def _template_default_folder_fields(tpl: Dict[str, Any]) -> Tuple[str, str]:
+    """Return (template_folder_token, template_output_folder) from a template dict."""
+    return (
+        str(tpl.get("folder_token") or "").strip(),
+        str(tpl.get("output_folder") or "").strip(),
+    )
+
+
 def list_templates(config: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     config = config or load_config()
     templates = config.get("templates") or {}
@@ -103,13 +193,24 @@ def list_templates(config: Optional[Dict[str, Any]] = None) -> List[Dict[str, An
     for key, tpl in templates.items():
         if not isinstance(tpl, dict):
             continue
+        tpl_raw, tpl_alias = _template_default_folder_fields(tpl)
+        try:
+            resolved_folder, resolved_alias = resolve_folder_token(
+                template_folder_token=tpl_raw,
+                template_output_folder=tpl_alias,
+                config=config,
+            )
+        except TemplateResolveError:
+            resolved_folder, resolved_alias = tpl_raw, tpl_alias
         result.append(
             {
                 "key": key,
                 "template_token": tpl.get("template_token") or "",
-                "folder_token": tpl.get("folder_token") or "",
+                "output_folder": resolved_alias or tpl_alias,
+                "folder_token": resolved_folder,
                 "document_name_pattern": tpl.get("document_name_pattern") or "",
                 "party_b_full_name": tpl.get("party_b_full_name") or "",
+                "template_type": str(tpl.get("type") or "docx"),
                 "placeholder_count": len(tpl.get("placeholders") or {}),
             }
         )
@@ -121,6 +222,7 @@ def resolve_template(
     signing_unit: Optional[str] = None,
     template_token: Optional[str] = None,
     folder_token: Optional[str] = None,
+    output_folder: Optional[str] = None,
     config: Optional[Dict[str, Any]] = None,
 ) -> ResolvedTemplate:
     """Resolve template from explicit tokens or signing_unit mapping."""
@@ -131,10 +233,14 @@ def resolve_template(
 
     explicit_token = (template_token or "").strip()
     if explicit_token:
-        folder = (folder_token or "").strip() or str(defaults.get("folder_token") or "").strip()
+        folder, folder_alias = resolve_folder_token(
+            request_folder_token=folder_token,
+            request_output_folder=output_folder,
+            config=config,
+        )
         if not folder:
             raise TemplateResolveError(
-                "folder_token is required when using explicit template_token",
+                "folder_token or output_folder is required when using explicit template_token",
                 error_code="MISSING_FOLDER_TOKEN",
             )
         return ResolvedTemplate(
@@ -145,6 +251,7 @@ def resolve_template(
             placeholders={},
             required_placeholders=required,
             rate_limit=rate_limit,
+            output_folder=folder_alias,
             explicit=True,
         )
 
@@ -152,16 +259,21 @@ def resolve_template(
     if not unit:
         # Fall back to defaults template_token for POC
         default_token = str(defaults.get("template_token") or "").strip()
-        default_folder = str(defaults.get("folder_token") or "").strip()
-        if default_token and default_folder:
+        folder, folder_alias = resolve_folder_token(
+            request_folder_token=folder_token,
+            request_output_folder=output_folder,
+            config=config,
+        )
+        if default_token and folder:
             return ResolvedTemplate(
                 key="__defaults__",
                 template_token=default_token,
-                folder_token=default_folder,
+                folder_token=folder,
                 document_name_pattern=str(defaults.get("document_name_pattern") or "合同-{订单号}"),
                 placeholders={},
                 required_placeholders=required,
                 rate_limit=rate_limit,
+                output_folder=folder_alias,
                 explicit=True,
             )
         raise TemplateResolveError(
@@ -180,7 +292,14 @@ def resolve_template(
         )
 
     token = str(tpl.get("template_token") or defaults.get("template_token") or "").strip()
-    folder = str(tpl.get("folder_token") or defaults.get("folder_token") or "").strip()
+    tpl_raw, tpl_alias = _template_default_folder_fields(tpl)
+    folder, folder_alias = resolve_folder_token(
+        request_folder_token=folder_token,
+        request_output_folder=output_folder,
+        template_folder_token=tpl_raw,
+        template_output_folder=tpl_alias,
+        config=config,
+    )
     if not token:
         raise TemplateResolveError(
             f"template_token missing for template key={template_key!r}",
@@ -188,12 +307,13 @@ def resolve_template(
         )
     if not folder:
         raise TemplateResolveError(
-            f"folder_token missing for template key={template_key!r}",
+            f"folder_token / output_folder missing for template key={template_key!r}",
             error_code="MISSING_FOLDER_TOKEN",
         )
 
     tpl_required = tpl.get("required_placeholders")
-    if isinstance(tpl_required, list) and tpl_required:
+    if isinstance(tpl_required, list):
+        # Explicit list (including empty) overrides defaults
         required = [str(x) for x in tpl_required]
 
     sheet_cfg = tpl.get("sheet")
@@ -201,6 +321,15 @@ def resolve_template(
         raise TemplateResolveError(
             f"sheet config must be a mapping for template key={template_key!r}",
             error_code="INVALID_SHEET_CONFIG",
+        )
+
+    template_type = str(tpl.get("type") or "docx").strip().lower() or "docx"
+    if template_type in {"sheet", "sheets", "spreadsheet"}:
+        template_type = "spreadsheet"
+    elif template_type not in {"docx", "spreadsheet"}:
+        raise TemplateResolveError(
+            f"unsupported template type={template_type!r} for key={template_key!r}",
+            error_code="INVALID_TEMPLATE_TYPE",
         )
 
     return ResolvedTemplate(
@@ -217,6 +346,14 @@ def resolve_template(
         required_placeholders=required,
         rate_limit=rate_limit,
         sheet=dict(sheet_cfg) if isinstance(sheet_cfg, dict) else None,
+        template_type=template_type,
+        append_detail_sheets=bool(tpl.get("append_detail_sheets")),
+        detail_sheets=(
+            dict(tpl["detail_sheets"])
+            if isinstance(tpl.get("detail_sheets"), dict)
+            else None
+        ),
+        output_folder=folder_alias,
         explicit=False,
     )
 
@@ -292,7 +429,7 @@ def _resolve_mapping_value(
             return format_currency(raw)
         if field_name in {"执行日期", "活动日期"}:
             return format_date_value(raw)
-        if field_name in {"执行人数", "活动人数"}:
+        if field_name in {"执行人数", "活动人数", "报价人数"}:
             return format_people_count(raw)
         if raw is None:
             return ""

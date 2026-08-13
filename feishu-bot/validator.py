@@ -80,10 +80,119 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", "", str(s or "")).lower()
 
 
+# 浙江农商联合社下属常见地名（用于「义乌农村商业银行」等无「浙江」前缀的写法）
+_ZJ_RURAL_PLACES = (
+    "杭州",
+    "宁波",
+    "温州",
+    "嘉兴",
+    "湖州",
+    "绍兴",
+    "金华",
+    "衢州",
+    "舟山",
+    "台州",
+    "丽水",
+    "义乌",
+    "余姚",
+    "慈溪",
+    "瑞安",
+    "乐清",
+    "诸暨",
+    "东阳",
+    "永康",
+    "海宁",
+    "桐乡",
+    "平湖",
+    "德清",
+    "安吉",
+    "长兴",
+    "柯桥",
+    "上虞",
+    "嵊州",
+    "新昌",
+    "兰溪",
+    "武义",
+    "浦江",
+    "磐安",
+    "江山",
+    "龙游",
+    "常山",
+    "开化",
+    "玉环",
+    "温岭",
+    "临海",
+    "黄岩",
+    "椒江",
+    "路桥",
+    "天台",
+    "仙居",
+    "三门",
+    "龙泉",
+    "青田",
+    "云和",
+    "庆元",
+    "缙云",
+    "遂昌",
+    "松阳",
+    "景宁",
+    "鄞州",
+    "余杭",
+    "萧山",
+    "富阳",
+    "临安",
+    "桐庐",
+    "建德",
+    "淳安",
+    "海盐",
+    "嘉善",
+    "南浔",
+    "吴兴",
+    "鹿城",
+    "瓯海",
+    "龙湾",
+    "苍南",
+    "平阳",
+    "永嘉",
+    "文成",
+    "泰顺",
+    "洞头",
+    "奉化",
+    "宁海",
+    "象山",
+    "北仑",
+    "镇海",
+    "海曙",
+    "江北",
+    "柯城",
+)
+
+
+def _match_zj_nongshang(value: str, options: List[str]) -> Optional[str]:
+    """未命中选项时：浙江农商体系下属行归并到「浙江农商银行」。
+
+    例：浙江义乌农村商业银行 → 浙江农商银行
+    """
+    target = "浙江农商银行"
+    if target not in options:
+        return None
+    raw = str(value).strip()
+    n = _norm(raw)
+    rural_markers = ("农村商业银行", "农商银行", "农商行", "农商")
+    has_rural = any(m in raw for m in rural_markers) or "浙农商" in n or "浙江农商" in n
+    if not has_rural:
+        return None
+    if "浙江" in raw or "浙农商" in n:
+        return target
+    if any(p in raw for p in _ZJ_RURAL_PLACES):
+        return target
+    return None
+
+
 def fuzzy_match_option(value: str, options: List[str]) -> Optional[str]:
     """将用户输入匹配到 options 中的标准值。
 
-    顺序：精确 → 银行简称别名表 → 包含关系模糊匹配。
+    顺序：精确 → 银行简称别名表 → 包含关系模糊匹配 → 浙江农商归并。
     """
     if is_blank_value(value):
         return None
@@ -116,6 +225,8 @@ def fuzzy_match_option(value: str, options: List[str]) -> Optional[str]:
         "杭州银行": "杭州银行股份有限公司",
         "宁波银行": "宁波银行股份有限公司",
         "农商": "浙江农商银行",
+        "浙江农商": "浙江农商银行",
+        "浙农商": "浙江农商银行",
     }
     if raw in aliases:
         target = aliases[raw]
@@ -125,7 +236,7 @@ def fuzzy_match_option(value: str, options: List[str]) -> Optional[str]:
         on = _norm(opt)
         if n and (n in on or on in n):
             return opt
-    return None
+    return _match_zj_nongshang(raw, options)
 
 
 def normalize_account_no(value: str) -> str:

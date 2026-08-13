@@ -192,12 +192,8 @@ fields:
     - 餐厅
     - 客户退款
     - 导游
-  scan_note:
-    name: 扫码备注
-    field_id: fldmdR8OD3
-    type: text
   qrcode:
-    name: 支付宝/微信
+    name: 支付宝/微信/二维码
     field_id: fldzomO4r4
     type: attachment
 require_any_group:
@@ -244,7 +240,6 @@ aliases:
   业务地区: region
   类型: supplier_type
   业务类型: supplier_type
-  扫码备注: scan_note
   支付宝: qrcode
   收款码: qrcode
   二维码: qrcode
@@ -256,8 +251,8 @@ rules:
   - 退款给客户
   set_fields:
     supplier_type: 客户退款
-  require_name_pattern: 客户退款\d{6,}
-  hint: 检测到客户退款场景：请将供应商名称改为「客户退款+订单号」，例如客户退款26071001；类型已自动设为客户退款。
+  require_name_pattern: (客户退款\d{6,}|\d{6,}客户退款)
+  hint: 检测到客户退款场景：请将供应商名称改为「客户退款+订单号」或「订单号+客户退款」，例如客户退款26071001、26071001客户退款；类型已自动设为客户退款。
 dedupe:
   enabled: true
   fields:

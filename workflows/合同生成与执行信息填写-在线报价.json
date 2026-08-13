@@ -1,0 +1,496 @@
+{
+  "name": "合同生成与执行信息填写-在线报价",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        3568,
+        480
+      ],
+      "id": "d0a2c8e4-e03f-4959-99a3-87eced5c9a5a",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "make-contract-online",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        3568,
+        672
+      ],
+      "id": "7f3058b0-216c-45bd-bc69-c327493a9df4",
+      "name": "Webhook",
+      "webhookId": "542f27a3-dd7a-4095-a670-1bc63c6048e6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3840,
+        672
+      ],
+      "id": "8545dcf3-105b-42ea-bc2c-6462bf8dd8c3",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "jsCode": "const quote = $input.first().json;\n\nconst execRecord =\n  $('查询执行表').first().json?.data?.items?.[0] || {};\nconst execFields = execRecord.fields || {};\n\nconst errors = [];\n\nfunction textOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v).trim();\n  if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join('；');\n  if (typeof v === 'object') {\n    if (Array.isArray(v.value)) return textOf(v.value);\n    if (v.text != null) return String(v.text).trim();\n    if (v.name != null) return String(v.name).trim();\n    if (v.link != null) return String(v.link).trim();\n  }\n  return '';\n}\n\nfunction dateOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10);\n  if (\n    typeof v === 'object' &&\n    Array.isArray(v.value) &&\n    typeof v.value[0] === 'number'\n  ) {\n    return new Date(v.value[0]).toISOString().slice(0, 10);\n  }\n  return textOf(v);\n}\n\nfunction fmtYuan(n) {\n  const x = Math.round(Number(n) * 100) / 100;\n  if (!Number.isFinite(x)) return '0';\n  return Number.isInteger(x) ? String(x) : x.toFixed(2);\n}\n\nfunction requireText(label, value) {\n  if (value == null || String(value).trim() === '') {\n    errors.push('缺少' + label);\n  }\n}\n\nif (!execRecord.record_id) errors.push('未找到执行记录');\n\n// 客户信息：单位 ； 联系人 ； 电话\nconst customerRaw = textOf(execFields['客户信息']);\nconst customerParts = customerRaw\n  .split(/[；;]/)\n  .map((s) => s.trim())\n  .filter(Boolean);\nconst 单位 = customerParts[0] || '';\nconst 联系人 = customerParts[1] || '';\nconst 联系方式 = customerParts[2] || '';\n\nconst payRaw = textOf(execFields['付款比例']);\nconst totalCost = Number(quote.活动总价);\n\nif (!Number.isFinite(totalCost) || totalCost <= 0) {\n  errors.push('在线报价活动总价无效: ' + (quote.活动总价 ?? ''));\n}\n\nconst ratios = String(payRaw || '')\n  .split(/[-—–_/／]/)\n  .map((s) => s.trim())\n  .filter(Boolean)\n  .map(Number);\n\nlet clauses = [];\nif (!payRaw) {\n  errors.push('缺少付款比例');\n} else if (ratios.length < 3 || ratios.some((n) => !Number.isFinite(n))) {\n  errors.push('付款比例格式无效，期望如 2-6-2，实际: ' + payRaw);\n} else if (Number.isFinite(totalCost) && totalCost > 0) {\n  const [r1, r2, r3] = ratios;\n  const [p1, p2, p3] = [r1 * 10, r2 * 10, r3 * 10];\n  if (p1 > 0) {\n    clauses.push(\n      '甲方于本合同签订之日起三个工作日内支付活动总款的' +\n        p1 +\n        '%作为预付款：' +\n        fmtYuan((totalCost * p1) / 100) +\n        '元。',\n    );\n  }\n  if (p2 > 0) {\n    clauses.push(\n      '甲方于活动出发前72小时内(出发当天不包含在内)支付活动总款的' +\n        p2 +\n        '%：' +\n        fmtYuan((totalCost * p2) / 100) +\n        '元，若逾期付款，乙方有权选择单方解除合同，活动将默认取消按照违约情况赔付。',\n    );\n  }\n  if (p3 > 0) {\n    clauses.push(\n      '甲方于活动结束在收到乙方开具的全额发票后，五个工作日内向乙方交纳活动余款' +\n        p3 +\n        '%：' +\n        fmtYuan((totalCost * p3) / 100) +\n        '元。',\n    );\n  }\n  if (!clauses.length) {\n    errors.push('付款比例三段均为 0，无法生成付款方式');\n  }\n}\n\nconst 费用明细 = Array.isArray(quote.报价明细条目) ? quote.报价明细条目 : [];\nconst 活动行程 = Array.isArray(quote.活动行程条目) ? quote.活动行程条目 : [];\n\nconst signingUnit = textOf(execFields['签约单位']);\nconst 订单号 = textOf(execFields['订单号']);\nconst 策划师 = textOf(execFields['策划']);\nconst 执行日期 = dateOf(execFields['执行日期']) || quote.执行日期_报价单 || '';\nconst 活动天数 = execFields['活动天数'] ?? quote.活动天数 ?? '';\nconst 活动名称 = quote.活动名称 || '';\nconst 出发地 = textOf(execFields['出发地']) || quote.出发地 || '';\nconst 目的地 = textOf(execFields['目的地']) || quote.目的地 || '';\nconst 执行人数 =\n  execFields['执行人数'] != null && execFields['执行人数'] !== ''\n    ? execFields['执行人数']\n    : quote.人数 ?? '';\nconst 执行编号 = textOf(execFields['执行编号']);\nconst 付款方式 = clauses.join('\\n');\nconst orderRecordId =\n  execFields['关联订单']?.link_record_ids?.[0] || '';\n\nrequireText('订单号', 订单号);\nrequireText('单位(甲方名称)', 单位);\nrequireText('联系人', 联系人);\nrequireText('联系方式', 联系方式);\nrequireText('签约单位', signingUnit);\nrequireText('策划师', 策划师);\nrequireText('执行日期(活动日期)', 执行日期);\nrequireText('活动名称', 活动名称);\nrequireText('执行人数', 执行人数);\nrequireText('活动天数', 活动天数);\nrequireText('出发地', 出发地);\nrequireText('目的地', 目的地);\nrequireText('执行编号', 执行编号);\nrequireText('在线报价', textOf(execFields['在线报价']) || $('解析在线报价链接').first().json.spreadsheet_token);\n\nif (!费用明细.length) errors.push('缺少费用明细');\nif (!活动行程.length) errors.push('缺少活动行程');\n\nconst ok = errors.length === 0;\nconst errorMessage = errors.join('；');\n\nreturn [\n  {\n    json: {\n      ok,\n      errors,\n      error_message: errorMessage,\n      合同生成回写值: ok ? '成功' : errorMessage,\n      tenant_access_token: $('获取飞书Token').first().json.tenant_access_token,\n      signing_unit: signingUnit,\n      exec_record_id: execRecord.record_id || '',\n      fields: {\n        订单号,\n        单位,\n        联系人,\n        联系方式,\n        签约单位: signingUnit,\n        策划师,\n        合同价款: Number.isFinite(totalCost) ? totalCost : null,\n        执行日期,\n        活动天数,\n        活动名称,\n        出发地,\n        目的地,\n        执行人数,\n        付款比例: payRaw,\n        付款方式,\n        费用明细,\n        活动行程,\n        执行编号,\n        执行记录_id: execRecord.record_id || '',\n        订单记录_id: orderRecordId,\n        甲方地址: '',\n        甲方税号: '',\n      },\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5616,
+        672
+      ],
+      "id": "bf69bae4-e9db-4a6e-8720-90c34334d8d8",
+      "name": "合同信息聚合"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('查询执行表').item.json.data.items[0].record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6496,
+        656
+      ],
+      "id": "24dc4e85-acbf-4b54-86a6-5bb9e2121090",
+      "name": "回写执行信息"
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanString(v) {\n  if (v == null) return '';\n  return String(v).trim();\n}\n\nfunction activityDaysNumber(v) {\n  if (v == null || v === '') return null;\n  const match = String(v).replace(/[,，\\s]/g, '').match(/\\d+(?:\\.\\d+)?/);\n  if (!match) return null;\n  const n = Number(match[0]);\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction dateToFeishuTimestamp(dateValue) {\n  if (!dateValue) return null;\n  const source = String(dateValue).trim();\n  const match = source.match(/^(\\d{4})[-年/](\\d{1,2})[-月/](\\d{1,2})(?:日)?$/);\n  if (!match) return null;\n  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).getTime();\n}\n\nconst src = $('合同信息聚合').first().json.fields;\nconst departure = cleanString(src['出发地']);\nconst destination = cleanString(src['目的地']);\nconst execDate = dateToFeishuTimestamp(src['执行日期']);\nconst activityDays = activityDaysNumber(src['活动天数']);\nconst population = src['执行人数'];\nconst fields = {\n  电子版合同: {\n    text: $input.first().json.document_name,\n    link: $input.first().json.document_url,\n  },\n  合同生成: '成功',\n};\n\nif (departure) fields['出发地'] = [departure];\nif (destination) fields['目的地'] = [destination];\nif (execDate !== null) fields['执行日期'] = execDate;\nif (activityDays !== null) fields['活动天数'] = activityDays;\nif (population !== null && population !== undefined && population !== '') {\n  fields['执行人数'] = population;\n}\n\nreturn { json: { fields } };\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6272,
+        656
+      ],
+      "id": "8502367d-4c63-4891-85ff-87887dbe6da5",
+      "name": "执行信息回写处理"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://feishu-files-generation:8030/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        6048,
+        656
+      ],
+      "id": "758e1d6e-e755-4368-acec-9cf9a9fca060",
+      "name": "生成合同"
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseSpreadsheetToken(field) {\n  const candidates = [];\n\n  function collect(value) {\n    if (value == null) return;\n    if (typeof value === 'string') {\n      candidates.push(value.trim());\n      return;\n    }\n    if (Array.isArray(value)) {\n      value.forEach(collect);\n      return;\n    }\n    if (typeof value === 'object') {\n      for (const key of ['link', 'url', 'value', 'text', 'token']) {\n        if (key in value) collect(value[key]);\n      }\n    }\n  }\n\n  collect(field);\n  for (const candidate of candidates) {\n    if (!candidate) continue;\n    let decoded = candidate;\n    try {\n      decoded = decodeURIComponent(candidate);\n    } catch {\n      // keep original\n    }\n    const urlMatch = decoded.match(/\\/sheets\\/([A-Za-z0-9_-]+)/i);\n    if (urlMatch) return urlMatch[1];\n    if (\n      /^[A-Za-z0-9_-]{10,}$/.test(decoded) &&\n      !/\\s/.test(decoded) &&\n      !/^https?:/i.test(decoded)\n    ) {\n      return decoded;\n    }\n  }\n\n  throw new Error('执行表「在线报价」中无法提取 spreadsheet_token');\n}\n\nconst response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error(\n    '读取执行表失败 [' + response.code + ']: ' + (response.msg || '未知错误'),\n  );\n}\n\nconst record = response.data?.items?.[0];\nif (!record) {\n  throw new Error('未找到待生成合同的执行记录');\n}\n\nconst onlineQuote = record.fields?.['在线报价'];\nif (onlineQuote == null || onlineQuote === '') {\n  throw new Error('执行表缺少「在线报价」链接');\n}\n\nconst spreadsheetToken = parseSpreadsheetToken(onlineQuote);\n\nreturn [\n  {\n    json: {\n      spreadsheet_token: spreadsheetToken,\n      exec_record_id: record.record_id || '',\n      order_record_id: record.fields?.['关联订单']?.link_record_ids?.[0] || '',\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4384,
+        672
+      ],
+      "id": "2a4fabcb-0c02-4c7f-b59a-c15d5cf9d9e7",
+      "name": "解析在线报价链接"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/{{ $json.spreadsheet_token }}/sheets/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $(\"获取飞书Token\").first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4640,
+        672
+      ],
+      "id": "e1a6eb56-d0b9-488a-a7e8-8fbac7ba12b4",
+      "name": "查询在线报价工作表"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error('查询在线报价工作表失败 [' + response.code + ']: ' + (response.msg || '未知错误'));\n}\nconst sheets = (response.data?.sheets || []).filter((s) => s && s.hidden !== true);\nconst first = sheets[0] || (response.data?.sheets || [])[0] || {};\nconst sheetId =\n  first.sheet_id ||\n  first.sheetId ||\n  first.sheet?.sheet_id ||\n  '';\nif (!sheetId) {\n  throw new Error('在线报价电子表格中未找到 worksheet sheet_id');\n}\n\nreturn [{\n  json: {\n    spreadsheet_token: $('解析在线报价链接').item.json.spreadsheet_token,\n    sheet_id: sheetId,\n    sheet_title: first.title || '',\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4896,
+        672
+      ],
+      "id": "b4635732-8503-45a0-b20b-a8731e3eb46b",
+      "name": "解析工作表ID"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{{ $json.spreadsheet_token }}/values_batch_get",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ranges",
+              "value": "={{ $json.sheet_id + \"!A1:I200\" }}"
+            },
+            {
+              "name": "valueRenderOption",
+              "value": "UnformattedValue"
+            },
+            {
+              "name": "dateTimeRenderOption",
+              "value": "FormattedString"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $(\"获取飞书Token\").first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        5184,
+        672
+      ],
+      "id": "5559770c-7055-46a4-b496-81537d0e5b07",
+      "name": "读取在线报价单元格"
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseOnlineQuoteValues(values) {\n  if (!Array.isArray(values) || values.length === 0) {\n    throw new Error('在线报价单元格数据为空');\n  }\n\n  function rawCell(row, index) {\n    const value = Array.isArray(row) ? row[index] : undefined;\n    if (value == null) return '';\n    if (typeof value !== 'object') return value;\n    if (value.value != null) {\n      if (Array.isArray(value.value)) return value.value[0] ?? '';\n      return value.value;\n    }\n    if (value.text != null) return value.text;\n    return '';\n  }\n\n  function text(value) {\n    if (value == null || value === '') return '';\n    if (typeof value === 'string' || typeof value === 'number') {\n      return String(value).trim();\n    }\n    if (Array.isArray(value)) return value.map(text).filter(Boolean).join('');\n    if (typeof value === 'object') {\n      if (value.value != null) return text(value.value);\n      if (value.text != null) return text(value.text);\n    }\n    return '';\n  }\n\n  function cell(row, index) {\n    return text(rawCell(row, index));\n  }\n\n  function numberOf(value) {\n    if (typeof value === 'number') return Number.isFinite(value) ? value : null;\n    const source = text(value);\n    if (!source) return null;\n    const normalized = source\n      .replace(/[¥￥元,，\\s]/g, '')\n      .replace(/％/g, '%');\n    if (/^-?\\d+(?:\\.\\d+)?%$/.test(normalized)) {\n      return Number(normalized.slice(0, -1)) / 100;\n    }\n    const number = Number(normalized);\n    return Number.isFinite(number) ? number : null;\n  }\n\n  function rowTexts(row) {\n    const width = Math.max(Array.isArray(row) ? row.length : 0, 9);\n    return Array.from({ length: width }, (_, index) => cell(row, index));\n  }\n\n  function rowBlob(row) {\n    return rowTexts(row).filter(Boolean).join(' ');\n  }\n\n  function findMeta(label, beforeIndex) {\n    for (let rowIndex = 0; rowIndex < beforeIndex; rowIndex += 1) {\n      const row = values[rowIndex];\n      const texts = rowTexts(row);\n      const labelIndex = texts.findIndex(\n        (value) => value.replace(/\\s*[:：]\\s*$/, '').trim() === label,\n      );\n      if (labelIndex < 0) continue;\n      for (let column = labelIndex + 1; column < texts.length; column += 1) {\n        if (texts[column]) return rawCell(row, column);\n      }\n    }\n    return '';\n  }\n\n  const detailHeaderIndex = values.findIndex((row) => {\n    const blob = rowBlob(row);\n    return (\n      blob.includes('类目') &&\n      blob.includes('物品名称') &&\n      blob.includes('描述') &&\n      blob.includes('数量') &&\n      blob.includes('单价')\n    );\n  });\n  if (detailHeaderIndex < 0) {\n    throw new Error('在线报价中未找到明细表头（类目/物品名称/描述/数量/单价）');\n  }\n\n  const headerTexts = rowTexts(values[detailHeaderIndex]);\n  const findColumn = (labels, fallback) => {\n    const index = headerTexts.findIndex((value) =>\n      labels.some((label) => value === label || value.includes(label)),\n    );\n    return index >= 0 ? index : fallback;\n  };\n  const columns = {\n    category: findColumn(['类目', '分类'], 0),\n    name: findColumn(['物品名称', '名称'], 1),\n    description: findColumn(['描述', '内容'], 2),\n    quantity: findColumn(['数量'], 3),\n    unitPrice: findColumn(['单价'], 4),\n    lineTotal: findColumn(['总价', '小计', '金额'], 5),\n  };\n\n  const totalIndex = values.findIndex(\n    (row, index) => index > detailHeaderIndex && rowBlob(row).includes('活动总价'),\n  );\n  if (totalIndex < 0) {\n    throw new Error('在线报价中未找到「活动总价」行');\n  }\n\n  const totalRow = values[totalIndex];\n  let activityTotal = null;\n  for (const column of [3, 4, 5, 6, 7, 8]) {\n    const candidate = numberOf(rawCell(totalRow, column));\n    if (candidate != null) {\n      activityTotal = candidate;\n      break;\n    }\n  }\n  if (activityTotal == null) {\n    throw new Error('在线报价「活动总价」行没有可读取的公式计算值（请确认已填单价且用 UnformattedValue 读取）');\n  }\n\n  const feeObjects = [];\n  let lastCategory = '';\n\n  for (let index = detailHeaderIndex + 1; index < totalIndex; index += 1) {\n    const row = values[index];\n    const categoryValue = cell(row, columns.category);\n    if (categoryValue) lastCategory = categoryValue.replace(/^\\d+\\s*[.、．]\\s*/, '').trim();\n    const category = lastCategory || '费用';\n    const name = cell(row, columns.name);\n    const description = cell(row, columns.description)\n      .replace(/[\\r\\n]+/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim();\n    const quantity = numberOf(rawCell(row, columns.quantity));\n    const unitPrice = numberOf(rawCell(row, columns.unitPrice));\n    const lineTotal = numberOf(rawCell(row, columns.lineTotal));\n    const isTax = /税费|服务费/.test(category + ' ' + name);\n\n    if (!name && !description && quantity == null && unitPrice == null && lineTotal == null) {\n      continue;\n    }\n    if (!isTax && lineTotal === 0) continue;\n\n    feeObjects.push({\n      分类: category,\n      名称: name || '(未命名)',\n      描述: description,\n      数量: quantity,\n      单价: unitPrice,\n      总价: lineTotal,\n    });\n  }\n\n  const itinerarySectionIndex = values.findIndex(\n    (row, index) => index > totalIndex && rowBlob(row).includes('活动行程'),\n  );\n  if (itinerarySectionIndex < 0) {\n    throw new Error('在线报价中未找到「活动行程」区域');\n  }\n\n  const itineraryHeaderIndex = values.findIndex((row, index) => {\n    if (index <= itinerarySectionIndex) return false;\n    const blob = rowBlob(row);\n    return blob.includes('日期') && blob.includes('时间') && blob.includes('内容');\n  });\n  if (itineraryHeaderIndex < 0) {\n    throw new Error('在线报价中未找到行程表头（日期/时间/内容）');\n  }\n\n  const itineraryHeaders = rowTexts(values[itineraryHeaderIndex]);\n  const itineraryColumns = {\n    date: itineraryHeaders.findIndex((value) => value.includes('日期')),\n    time: itineraryHeaders.findIndex((value) => value.includes('时间')),\n    content: itineraryHeaders.findIndex((value) => value.includes('内容')),\n  };\n  const tripObjects = [];\n  let lastDay = '';\n\n  for (let index = itineraryHeaderIndex + 1; index < values.length; index += 1) {\n    const row = values[index];\n    const dateValue = cell(row, itineraryColumns.date >= 0 ? itineraryColumns.date : 0);\n    const timeValue = cell(row, itineraryColumns.time >= 0 ? itineraryColumns.time : 1);\n    const content = cell(row, itineraryColumns.content >= 0 ? itineraryColumns.content : 2)\n      .replace(/[\\r\\n]+/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim();\n    if (!dateValue && !timeValue && !content) continue;\n    if (dateValue) lastDay = dateValue;\n    if (!content) continue;\n\n    const day = /^d\\d+$/i.test(lastDay)\n      ? lastDay.toLowerCase().replace(/^d/, 'day')\n      : lastDay || '行程';\n\n    tripObjects.push({\n      日期: day,\n      时间: timeValue,\n      内容: content,\n    });\n  }\n\n  const activityName = text(findMeta('活动名称', detailHeaderIndex));\n  const peopleRaw = findMeta('报价人数', detailHeaderIndex);\n  const people = numberOf(peopleRaw) ?? text(peopleRaw);\n  const activityDays = text(findMeta('活动天数', detailHeaderIndex));\n  const activityDate = text(findMeta('活动日期', detailHeaderIndex));\n  const originDestination = text(findMeta('出发地目的地', detailHeaderIndex));\n  const [departure = '', destination = ''] = originDestination\n    .split(/[-—–～~]/)\n    .map((value) => value.trim());\n\n  return {\n    活动名称: activityName,\n    人数: people,\n    活动天数: activityDays,\n    执行日期_报价单: activityDate,\n    出发地: departure,\n    目的地: destination,\n    出发地目的地: originDestination,\n    活动总价: activityTotal,\n    报价明细条目: feeObjects,\n    活动行程条目: tripObjects,\n    extracted: [\n      { key: '活动名称', value: activityName },\n      { key: '人数', value: people },\n      { key: '活动天数', value: activityDays },\n      { key: '执行日期', value: activityDate },\n      {\n        key: '出发地目的地',\n        value: originDestination,\n        出发地: departure,\n        目的地: destination,\n      },\n      { key: '活动总价', value: activityTotal },\n      { key: '报价明细条目', value: feeObjects },\n      { key: '活动行程条目', value: tripObjects },\n    ],\n  };\n}\n\nconst response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error('读取在线报价单元格失败 [' + response.code + ']: ' + (response.msg || '未知错误'));\n}\nconst valueRanges = response.data?.valueRanges || [];\nconst values = valueRanges[0]?.values || [];\nreturn [{ json: parseOnlineQuoteValues(values) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5392,
+        672
+      ],
+      "id": "8fe06edd-f586-4abf-896e-27da0e2969a9",
+      "name": "在线报价信息提取"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl821KbTBpjjyXI/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"filter\": {\n    \"conjunction\": \"or\",\n    \"conditions\": [\n      {\n        \"field_name\": \"合同生成\",\n        \"operator\": \"is\",\n        \"value\": [\"提交\"]\n      },\n      {\n        \"field_name\": \"合同生成\",\n        \"operator\": \"is\",\n        \"value\": [\"重试\"]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4080,
+        672
+      ],
+      "id": "668013b4-90de-48f7-ad60-71c04db4d7de",
+      "name": "查询执行表"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "5280ff2f-f3f7-46fc-9076-7972fc66b72d",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        5824,
+        672
+      ],
+      "id": "08a36313-3744-4f51-93f4-8899a5bea284",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('查询执行表').item.json.data.items[0].record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fields\": {\n    \"合同生成\": \"{{ $json.error_message }}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6064,
+        816
+      ],
+      "id": "a8089f68-625f-48f0-a682-ea0ed6636130",
+      "name": "回写错误"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "查询执行表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "合同信息聚合": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "执行信息回写处理": {
+      "main": [
+        [
+          {
+            "node": "回写执行信息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成合同": {
+      "main": [
+        [
+          {
+            "node": "执行信息回写处理",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析在线报价链接": {
+      "main": [
+        [
+          {
+            "node": "查询在线报价工作表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询在线报价工作表": {
+      "main": [
+        [
+          {
+            "node": "解析工作表ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析工作表ID": {
+      "main": [
+        [
+          {
+            "node": "读取在线报价单元格",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取在线报价单元格": {
+      "main": [
+        [
+          {
+            "node": "在线报价信息提取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "在线报价信息提取": {
+      "main": [
+        [
+          {
+            "node": "合同信息聚合",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询执行表": {
+      "main": [
+        [
+          {
+            "node": "解析在线报价链接",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "生成合同",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "回写错误",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "cdbd09e3-5df9-4201-bde7-8e14f2685efc",
+  "meta": {
+    "instanceId": "cc92663593ba8b2f21ed99048d0a8c90b47f6fae04df4e2dfe5eae0e7d4fbff6"
+  },
+  "id": "3PM1oowUyKhu4ftA",
+  "tags": []
+}

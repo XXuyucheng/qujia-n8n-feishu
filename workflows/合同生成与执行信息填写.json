@@ -1,0 +1,470 @@
+{
+  "name": "合同生成与执行信息填写",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        800,
+        288
+      ],
+      "id": "35c74855-5cc3-405d-a8a6-f28ad5a529c1",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "make-contract",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        800,
+        512
+      ],
+      "id": "f9628476-ba0c-479f-aa7a-c5c25b945d31",
+      "name": "Webhook",
+      "webhookId": "542f27a3-dd7a-4095-a670-1bc63c6048e6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1072,
+        368
+      ],
+      "id": "26447f80-09ea-4304-baf0-e20f1691d65e",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl821KbTBpjjyXI/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"filter\": {\n    \"conjunction\": \"or\",\n    \"conditions\": [\n      {\n        \"field_name\": \"合同生成\",\n        \"operator\": \"is\",\n        \"value\": [\"提交\"]\n      },\n      {\n        \"field_name\": \"合同生成\",\n        \"operator\": \"is\",\n        \"value\": [\"重试\"]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1280,
+        368
+      ],
+      "id": "59240f5e-bdba-497f-9a6b-9fb2f5afd130",
+      "name": "查询待识别执行记录"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl91gZyDPCLhlva/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"filter\": {\n    \"conjunction\": \"and\",\n    \"conditions\": [\n      {\n        \"field_name\": \"记录 ID\",\n        \"operator\": \"is\",\n        \"value\": [\"{{ $json.fields[\"关联订单\"].link_record_ids[0] }}\"]\n      }\n    ]\n  }\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1968,
+        384
+      ],
+      "id": "3f154fa1-115c-4f21-bf2f-7bb8ce732e96",
+      "name": "查询待识报价附件"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.data.items[0].fields[\"报价单\"][0].tmp_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2176,
+        384
+      ],
+      "id": "868ae9b5-2899-49a0-ae57-49293523e4a9",
+      "name": "获取临时下载链接"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        2592,
+        384
+      ],
+      "id": "87d104ec-794a-45f5-beb3-d2cac2ed451d",
+      "name": "Extract from File1"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.data.tmp_download_urls[0].tmp_download_url}}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2384,
+        384
+      ],
+      "id": "dd6ae0f5-7ab6-4eb3-b43d-04243c6b1356",
+      "name": "下载文件"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1728,
+        368
+      ],
+      "id": "14f32622-4600-462b-8784-01f2b2b1cee8",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 上游：Extract from File1 的全部行\nconst rows = $input.all().map((i) => i.json);\n\nfunction cell(row, key) {\n  const v = row?.[key];\n  if (v == null || v === '') return '';\n  return String(v).trim();\n}\n\nfunction excelTime(v) {\n  if (typeof v === 'number' && v > 0 && v < 1) {\n    const mins = Math.round(v * 24 * 60);\n    const h = String(Math.floor(mins / 60)).padStart(2, '0');\n    const m = String(mins % 60).padStart(2, '0');\n    return `${h}:${m}`;\n  }\n  return v == null || v === '' ? '' : String(v).trim();\n}\n\nfunction num(v) {\n  const n = Number(v);\n  return Number.isFinite(n) ? n : null;\n}\n\nfunction stripCategory(raw) {\n  return String(raw || '')\n    .replace(/^\\d+\\s*[.、．]\\s*/, '')\n    .trim();\n}\n\nfunction fmtMoney(n) {\n  if (!Number.isFinite(n)) return '';\n  return Number.isInteger(n) ? String(n) : n.toFixed(2);\n}\n\n// —— 固定区：index 1~5 ——\n// 0=表头，1=活动名称，2=人数，3=活动天数，4=执行日期，5=出发地目的地\nconst 活动名称 = cell(rows[1], '__EMPTY_1');\nconst 人数 = num(rows[2]?.['__EMPTY_1']) ?? cell(rows[2], '__EMPTY_1');\nconst 活动天数 = cell(rows[3], '__EMPTY_1');\nconst 执行日期 = cell(rows[4], '__EMPTY_1');\nconst od = cell(rows[5], '__EMPTY_1');\nconst [出发地, 目的地] = od.split(/[-—–～~]/).map((s) => s.trim());\n\n// —— 定位「活动总价」行 ——\nconst totalIdx = rows.findIndex((r, i) => {\n  if (i <= 5) return false;\n  const a = cell(r, 'QUJIA趣加团建');\n  return a.includes('活动总价');\n});\nif (totalIdx < 0) {\n  throw new Error('未找到含「活动总价」的行');\n}\n\nconst totalRow = rows[totalIdx];\nconst 活动总价 =\n  num(totalRow['__EMPTY_2']) ??\n  num(totalRow['__EMPTY_1']) ??\n  num(totalRow['__EMPTY_4']);\n\n// —— 明细区：6 ~ totalIdx-1（跳过表头「物品名称」行）——\nconst feeLines = [];\nconst feeObjects = [];\nlet category = '';\n\nfor (let i = 6; i < totalIdx; i++) {\n  const r = rows[i];\n  const a = cell(r, 'QUJIA趣加团建');\n  const name = cell(r, '__EMPTY');\n  // 去掉表格里的换行，并压缩多余空白\n  const desc = cell(r, '__EMPTY_1')\n    .replace(/[\\r\\n]+/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n  const qty = r['__EMPTY_2'];\n  const price = r['__EMPTY_3'];\n  const total = r['__EMPTY_4'];\n\n  if (a && /^\\d+\\s*[.、．]/.test(a)) {\n    category = stripCategory(a);\n  }\n\n  // 跳过列头 / 空行 / 零金额行\n  if (name === '物品名称' || desc === '描述') continue;\n  if (!name && !desc) continue;\n\n  const qtyN = num(qty);\n  const priceN = num(price);\n  const totalN = num(total);\n  if (totalN === 0) continue;\n\n  const itemName = name || '(未命名)';\n  const calc =\n    qtyN != null && priceN != null\n      ? `${fmtMoney(qtyN)}*${fmtMoney(priceN)}=${fmtMoney(totalN ?? qtyN * priceN)}`\n      : totalN != null\n        ? fmtMoney(totalN)\n        : '';\n\n  // 交通： 大巴车（55座）\t1*4800=4800\t\t描述\n  const md = `${category || '费用'}： ${itemName}\\t${calc}\\t\\t${desc}`;\n  feeLines.push(md);\n  feeObjects.push({\n    分类: category || '费用',\n    名称: itemName,\n    描述: desc,\n    数量: qtyN,\n    单价: priceN,\n    总价: totalN,\n    markdown: md,\n  });\n}\n\n// —— 行程区：totalIdx 之后 ——\nconst tripLines = [];\nconst tripObjects = [];\nlet day = '';\n\nfor (let i = totalIdx + 1; i < rows.length; i++) {\n  const r = rows[i];\n  const a = cell(r, 'QUJIA趣加团建');\n  const b = r['__EMPTY'];\n  const c = cell(r, '__EMPTY_1');\n\n  if (a === '活动行程') continue;\n  if (a === '日期' && cell(r, '__EMPTY') === '时间') continue;\n\n  if (/^D\\d+$/i.test(a)) {\n    day = a.toLowerCase().replace(/^d/, 'day');\n  }\n\n  const time = excelTime(b);\n  const content = c;\n  if (!content || content === '内容') continue;\n\n  // day1\t\t10:00-12:00\t前往景区\n  const md = `${day || '行程'}\\t\\t${time}\\t\\t\\t${content}`;\n  tripLines.push(md);\n  tripObjects.push({ day: day || '', 时间: time, 内容: content, markdown: md });\n}\n\n// 按「名称 → … → 行程」输出为一个对象数组（下游也可直接取扁平字段）\nconst extracted = [\n  { key: '活动名称', value: 活动名称 },\n  { key: '人数', value: 人数 },\n  { key: '活动天数', value: 活动天数 },\n  { key: '执行日期', value: 执行日期 },\n  { key: '出发地目的地', value: od, 出发地: 出发地 || '', 目的地: 目的地 || '' },\n  { key: '活动总价', value: 活动总价 },\n  { key: '报价明细', value: feeLines.join('\\n'), items: feeObjects },\n  { key: '活动行程', value: tripLines.join('\\n'), items: tripObjects },\n];\n\nreturn [\n  {\n    json: {\n      活动名称,\n      人数,\n      活动天数,\n      执行日期_报价单: 执行日期,\n      出发地: 出发地 || '',\n      目的地: 目的地 || '',\n      出发地目的地: od,\n      活动总价,\n      报价明细: feeLines.join('\\n'),\n      活动行程: tripLines.join('\\n'),\n      报价明细条目: feeObjects,\n      活动行程条目: tripObjects,\n      extracted, // 名称→行程 的对象数组\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        384
+      ],
+      "id": "0f3dc072-8922-4122-a1a4-58e590fd4232",
+      "name": "报价信息提取"
+    },
+    {
+      "parameters": {
+        "jsCode": "const quote = $input.first().json; // 节点1 输出\n\nconst execFields =\n  $('查询待识别执行记录').first().json?.data?.items?.[0]?.fields || {};\nconst quoteFields =\n  $('查询待识报价附件').first().json?.data?.items?.[0]?.fields || {};\nconst execRecordId =\n  $('查询待识别执行记录').first().json?.data?.items?.[0]?.record_id || '';\nconst orderRecordId =\n  $('查询待识报价附件').first().json?.data?.items?.[0]?.record_id || '';\n\nfunction textOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v).trim();\n  if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join('；');\n  if (typeof v === 'object') {\n    if (Array.isArray(v.value)) return textOf(v.value);\n    if (v.text != null) return String(v.text).trim();\n    if (v.name != null) return String(v.name).trim();\n  }\n  return '';\n}\n\nfunction dateOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10);\n  if (typeof v === 'object' && Array.isArray(v.value) && typeof v.value[0] === 'number') {\n    return new Date(v.value[0]).toISOString().slice(0, 10);\n  }\n  return textOf(v);\n}\n\nfunction fmtYuan(n) {\n  const x = Math.round(Number(n) * 100) / 100;\n  if (!Number.isFinite(x)) return '0';\n  return Number.isInteger(x) ? String(x) : x.toFixed(2);\n}\n\n// —— 客户信息：单位 ； 联系人 ； 电话 ——\nconst customerRaw = textOf(execFields['客户信息']);\nconst parts = customerRaw.split(/[；;]/).map((s) => s.trim()).filter(Boolean);\nconst 单位 = parts[0] || textOf(quoteFields['单位']);\nconst 联系人 = parts[1] || textOf(quoteFields['联系人']);\nconst 联系方式 = parts[2] || textOf(quoteFields['联系方式']);\n\n// —— 付款比例：如 \"2-6-2\" → 20% 预付 / 60% 出发前 / 20% 尾款 ——\nconst payRaw = textOf(execFields['付款比例']); // 也可用表达式写入，但跨节点用 $() 更稳\nconst totalCost = Number(quote.活动总价);\nif (!Number.isFinite(totalCost) || totalCost <= 0) {\n  throw new Error(`活动总价无效: ${quote.活动总价}`);\n}\n\nconst ratios = String(payRaw || '')\n  .split(/[-—–_/／]/)\n  .map((s) => s.trim())\n  .filter(Boolean)\n  .map((s) => Number(s));\n\nif (ratios.length < 3 || ratios.some((n) => !Number.isFinite(n))) {\n  throw new Error(`付款比例格式无效，期望如 2-6-2，实际: ${payRaw}`);\n}\n\n// 单个数字按「成」理解：2 → 20%\nconst [r1, r2, r3] = ratios;\nconst p1 = r1 * 10; // %\nconst p2 = r2 * 10;\nconst p3 = r3 * 10;\nconst a1 = (totalCost * p1) / 100;\nconst a2 = (totalCost * p2) / 100;\nconst a3 = (totalCost * p3) / 100;\n\nconst clauses = [];\nif (p1 > 0) {\n  clauses.push(\n    `甲方于本合同签订之日起三个工作日内支付活动总款的${p1}%作为预付款：${fmtYuan(a1)}元。`,\n  );\n}\nif (p2 > 0) {\n  clauses.push(\n    `甲方于活动出发前72小时内(出发当天不包含在内)支付活动总款的${p2}%：${fmtYuan(a2)}元，若逾期付款，乙方有权选择单方解除合同，活动将默认取消按照违约情况赔付。`,\n  );\n}\nif (p3 > 0) {\n  clauses.push(\n    `甲方于活动结束在收到乙方开具的全额发票后，五个工作日内向乙方交纳活动余款${p3}%：${fmtYuan(a3)}元。`,\n  );\n}\n\nconst 付款方式 = clauses.join('\\n');\n\n// 行程+费用合并为合同占位符文本\nconst 活动行程与费用明细 = [\n  '一、费用明细',\n  quote.报价明细 || '',\n  '',\n  `活动总价（含税）：${fmtYuan(totalCost)}元`,\n  '',\n  '二、活动行程',\n  quote.活动行程 || '',\n].join('\\n');\n\nconst token = $('获取飞书Token').first().json.tenant_access_token\n\nreturn [\n  {\n    json: {\n      \"tenant_access_token\": token,\n      \"signing_unit\": $item(\"0\").$node[\"拆分item\"].json[\"fields\"][\"签约单位\"][\"value\"][\"0\"] ,\n      \"fields\": {\n        订单号: textOf(quoteFields['订单号']),\n        单位,\n        联系人,\n        联系方式,\n        签约单位: textOf(execFields['签约单位']) || textOf(quoteFields['签约单位']),\n        策划师: textOf(execFields['策划']) || textOf(quoteFields['策划师']),\n        合同价款: totalCost,\n        执行日期:\n          dateOf(quoteFields['执行日期']) ||\n          dateOf(execFields['执行日期']) ||\n          quote.执行日期_报价单 ||\n          '',\n        活动天数:$input.first().json[\"活动天数\"],\n        活动名称: quote.活动名称 || '',\n        出发地: quote.出发地 || textOf(quoteFields['出发地']),\n        目的地: quote.目的地 || textOf(quoteFields['目的地']),\n        执行人数: quote.人数 || textOf(quoteFields['执行人数']),\n        付款比例: payRaw,\n        付款方式,\n        活动行程与费用明细,\n        活动费用明细: 活动行程与费用明细, // 兼容 feishu-files-generation config\n        执行编号: textOf(execFields['执行编号']),\n        执行记录_id: execRecordId,\n        订单记录_id: orderRecordId,\n        甲方地址: '',\n        甲方税号: '',\n      },\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3008,
+        384
+      ],
+      "id": "54a912e3-f677-45d4-836c-dc64a4a59ceb",
+      "name": "合同信息聚合"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $item(\"0\").$node[\"Loop Over Items\"].json[\"record_id\"] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3760,
+        384
+      ],
+      "id": "1400fe5a-f3f4-4ffc-ab11-6fdf1be004c0",
+      "name": "回写执行信息"
+    },
+    {
+      "parameters": {
+        "jsCode": "function cleanString(v) {\n  if (v === null || v === undefined) return '';\n  return String(v).trim();\n}\n\nfunction cleanNumber(v) {\n  if (v === null || v === undefined || v === '') return null;\n  const n = Number(String(v).replace(/[,，\\s]/g, '').trim());\n  return Number.isFinite(n) ? n : null;\n}\n\n/** yyyy-mm-dd → 飞书日期毫秒时间戳；非法则 null */\nfunction dateToFeishuTimestamp(dateStr) {\n  if (!dateStr) return null;\n  const s = String(dateStr).trim();\n  const m = s.match(/^(\\d{4})-(\\d{1,2})-(\\d{1,2})$/);\n  if (!m) return null;\n  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime();\n}\n\nconst src = $('合同信息聚合').first().json.fields; //传入上游节点的数据\nconst departure = cleanString(src['出发地']);\nconst destination = cleanString(src['目的地']);\nconst execDate = dateToFeishuTimestamp(src['执行日期']);\nconst activityDays = cleanNumber(src['活动天数']);\nconst Numberpopulation = src['执行人数'];\nconst contracturl = {\n      \"text\": $input.first().json.document_name,\n      \"link\": $input.first().json.document_url\n};\nconst status = \"成功\";\n\nconst fields = {};\n\nif (departure) fields['出发地'] = [departure];\nif (destination) fields['目的地'] = [destination];\nif (execDate !== null) fields['执行日期'] = execDate;\nif (activityDays !== null) fields['活动天数'] = activityDays;\nif (Numberpopulation !== null) fields['执行人数'] = Numberpopulation;\nif (contracturl !== null) fields['电子版合同'] = contracturl;\nif (status) fields['合同生成'] = status;\n\nreturn {\n  json: {\n    fields\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        384
+      ],
+      "id": "894e6d17-bfac-45e9-a5d5-ffd4fa65d2ab",
+      "name": "执行信息回写处理"
+    },
+    {
+      "parameters": {
+        "jsCode": "const records = $json.data?.items || [];\nreturn records.map((record) => ({ json: record }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        368
+      ],
+      "id": "4772b268-3bc2-4925-a41e-5e890dbe7044",
+      "name": "拆分item"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://feishu-files-generation:8030/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3232,
+        384
+      ],
+      "id": "afa0fa14-ccfd-4792-ba71-fd6c7ca602c5",
+      "name": "生成合同"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "查询待识别执行记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询待识别执行记录": {
+      "main": [
+        [
+          {
+            "node": "拆分item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询待识报价附件": {
+      "main": [
+        [
+          {
+            "node": "获取临时下载链接",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取临时下载链接": {
+      "main": [
+        [
+          {
+            "node": "下载文件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File1": {
+      "main": [
+        [
+          {
+            "node": "报价信息提取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载文件": {
+      "main": [
+        [
+          {
+            "node": "Extract from File1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "查询待识报价附件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "报价信息提取": {
+      "main": [
+        [
+          {
+            "node": "合同信息聚合",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "合同信息聚合": {
+      "main": [
+        [
+          {
+            "node": "生成合同",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "执行信息回写处理": {
+      "main": [
+        [
+          {
+            "node": "回写执行信息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "拆分item": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成合同": {
+      "main": [
+        [
+          {
+            "node": "执行信息回写处理",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "回写执行信息": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "3a37ed52-ef6d-4732-af60-7117bcc875a8",
+  "meta": {
+    "instanceId": "cc92663593ba8b2f21ed99048d0a8c90b47f6fae04df4e2dfe5eae0e7d4fbff6"
+  },
+  "id": "bfiqanayLkMAt1Lu",
+  "tags": []
+}

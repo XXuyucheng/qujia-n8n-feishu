@@ -16,6 +16,9 @@ services:
       - GENERIC_TIMEZONE=Asia/Shanghai
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=5000
       - FEISHU_APP_ID=${FEISHU_APP_ID}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
       - FEISHU_BASE_ID=${FEISHU_BASE_ID}
@@ -92,7 +95,8 @@ services:
     ports:
       - "8030:8030"
     volumes:
-      - ./feishu-files-generation/config.yaml:/app/config.yaml:ro
+      # 挂载源码，改 .py 后 restart 即可生效（依赖仍来自镜像）；config 一并覆盖
+      - ./feishu-files-generation:/app
     environment:
       - TZ=Asia/Shanghai
       - FEISHU_FILES_GENERATION_CONFIG_PATH=/app/config.yaml

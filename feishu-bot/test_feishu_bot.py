@@ -121,6 +121,20 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(fuzzy_match_option("工行", opts), "中国工商银行")
         self.assertEqual(fuzzy_match_option("中国工商银行", opts), "中国工商银行")
 
+    def test_zj_nongshang_sub_banks(self):
+        """浙江农商下属行归并到选项「浙江农商银行」。"""
+        opts = CONFIG["fields"]["bank_name"]["options"]
+        self.assertIn("浙江农商银行", opts)
+        self.assertEqual(
+            fuzzy_match_option("浙江义乌农村商业银行", opts), "浙江农商银行"
+        )
+        self.assertEqual(
+            fuzzy_match_option("义乌农村商业银行", opts), "浙江农商银行"
+        )
+        self.assertEqual(fuzzy_match_option("浙农商", opts), "浙江农商银行")
+        # 非浙江农商体系仍不匹配
+        self.assertIsNone(fuzzy_match_option("北京农村商业银行", opts))
+
     def test_payment_bank_group(self):
         data = {
             "supplier_name": "A",
@@ -194,7 +208,7 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(fields["供应商"], "A")
         self.assertEqual(fields["银行名称"], "中国工商银行")
         self.assertEqual(fields["结算类型"], ["月结"])
-        self.assertEqual(fields["支付宝/微信"], [{"file_token": "ftoken"}])
+        self.assertEqual(fields["支付宝/微信/二维码"], [{"file_token": "ftoken"}])
 
 
 class FakeFeishu:
@@ -245,6 +259,17 @@ class RulesTests(unittest.TestCase):
         data, hints, active = apply_rules(
             "客户退款",
             {"supplier_name": "客户退款26071001"},
+            CONFIG,
+        )
+        self.assertEqual(data["supplier_type"], "客户退款")
+        self.assertEqual(hints, [])
+        self.assertIn("customer_refund", active)
+
+    def test_customer_refund_name_order_suffix(self):
+        """支持「订单号+客户退款」格式。"""
+        data, hints, active = apply_rules(
+            "客户退款",
+            {"supplier_name": "26071001客户退款"},
             CONFIG,
         )
         self.assertEqual(data["supplier_type"], "客户退款")

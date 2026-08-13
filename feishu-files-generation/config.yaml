@@ -1,10 +1,16 @@
 # feishu-files-generation 模板与占位符映射
 # 将 template_token / folder_token 替换为真实飞书 token，或通过环境变量注入 defaults。
+#
+# 输出目录选择（优先级高→低）：
+#   1. 请求 folder_token（原始飞书 folder token）
+#   2. 请求 output_folder（下方 output_folders 别名）
+#   3. 模板 output_folder / folder_token
+#   4. defaults.folder_token / defaults.output_folder
 
 defaults:
   template_token: "${FEISHU_CONTRACT_TEMPLATE_TOKEN}"
   folder_token: "${FEISHU_CONTRACT_OUTPUT_FOLDER}"
-  document_name_pattern: "合同-{订单号}"
+  document_name_pattern: "{订单号}"
   required_placeholders:
     - 甲方名称
     - 乙方名称
@@ -18,12 +24,45 @@ defaults:
     batch_size: 20
     batch_delay_ms: 350
 
+# 命名输出目录：n8n 传 output_folder 别名即可，无需在工作流里硬编码 folder token
+output_folders:
+  趣加旅社合同: "UtBAfoddYlwW3tdA6FTcwiImn1c"
+  趣伽团建合同: "HgX1feLiBlORwvdslj3cJX9mnzf"
+  趣加文化创意合同: "HBW9fRr8plrVbsdQqeuc74kknxb"
+  出团计划单: "IBTBfdFszl5hujdAp1GcrRAAnfc"
+  在线报价: "CNxzf1R0FlwdY8dkQEhcH9Efnvg"
+
+
 templates: #大括号内是占位符，生成合同时会被替换为n8n传入的实际值 大括号左边是模板中对应的占位符名称
   趣加旅社:
     template_token: "QyyUdUdXYoXzklxSUUGcanmenoh"
-    folder_token: "UtBAfoddYlwW3tdA6FTcwiImn1c"
-    document_name_pattern: "合同-{订单号}-趣加旅社"
-    party_b_full_name: "杭州趣加旅社有限公司"
+    output_folder: 趣加旅社合同
+    document_name_pattern: "趣加旅行社活动合同{订单号}"
+    party_b_full_name: "杭州趣加旅行社服务有限公司"
+    # 文末追加费用明细 / 行程明细内嵌 Sheet（fields.费用明细 / fields.活动行程）
+    append_detail_sheets: true
+    detail_sheets:
+      style:
+        h_align: center          # sheet cells: left | center | right
+        v_align: center          # top | center | bottom
+        font_size: "10pt/1.5"
+        header_bold: true
+        title_align: left        # H2 title: left | center | right
+      fee:
+        title: 费用明细
+        columns:
+          - { field: 分类, header: 分类, width: 75 }
+          - { field: 名称, header: 名称, width: 120 }
+          - { field: 描述, header: 描述, width: 330 }
+          - { field: 数量, header: 数量, width: 50 }
+          - { field: 单价, header: 单价, width: 60 }
+          - { field: 总价, header: 总价, width: 70 }
+      itinerary:
+        title: 行程明细
+        columns:
+          - { field: 日期, header: 日期, width: 50 }
+          - { field: 时间, header: 时间, width: 100 }
+          - { field: 内容, header: 内容, width: 300 }
     placeholders:
       甲方名称: "{单位}"
       甲方地址: "{甲方地址}"
@@ -40,7 +79,112 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       执行人数: "{执行人数}"
       活动名称: "{活动名称}"
       签订日期: "@today"
-      活动行程与费用明细: "{活动行程与费用明细}"
+      # 旧合并正文占位强制清空；明细改由文末内嵌 Sheet 写入
+      活动行程与费用明细: ""
+      # 以下 key 当前模板正文中没有对应 {{}}；模板补上后即可生效
+      甲方联系人: "{联系人}"
+      甲方电话: "{联系方式}"
+      策划师: "{策划师}"
+
+  趣伽团建:
+    template_token: "P2nxdAGl2oOqpZxgpVQcyZOGnEg"
+    output_folder: 趣伽团建合同
+    document_name_pattern: "趣伽团建策划活动合同{订单号}"
+    party_b_full_name: "杭州趣伽团建策划有限公司"
+    # 文末追加费用明细 / 行程明细内嵌 Sheet（fields.费用明细 / fields.活动行程）
+    append_detail_sheets: true
+    detail_sheets:
+      style:
+        h_align: center          # sheet cells: left | center | right
+        v_align: center          # top | center | bottom
+        font_size: "10pt/1.5"
+        header_bold: true
+        title_align: left        # H2 title: left | center | right
+      fee:
+        title: 费用明细
+        columns:
+          - { field: 分类, header: 分类, width: 75 }
+          - { field: 名称, header: 名称, width: 120 }
+          - { field: 描述, header: 描述, width: 330 }
+          - { field: 数量, header: 数量, width: 50 }
+          - { field: 单价, header: 单价, width: 60 }
+          - { field: 总价, header: 总价, width: 70 }
+      itinerary:
+        title: 行程明细
+        columns:
+          - { field: 日期, header: 日期, width: 50 }
+          - { field: 时间, header: 时间, width: 100 }
+          - { field: 内容, header: 内容, width: 300 }
+    placeholders:
+      甲方名称: "{单位}"
+      甲方地址: "{甲方地址}"
+      甲方税号: "{甲方税号}"
+      乙方名称: "@party_b_full_name"
+      乙方地址: "浙江省杭州市滨江区长河街道江虹南路398号13楼1313室"
+      乙方银行账号: "551437612500015"
+      乙方开户行: "台州银行杭州滨江支行"
+      乙方税号: "91330108MAKGT1JG06"
+      活动费用: "{合同价款}"
+      付款方式: "{付款方式}"
+      活动日期: "{执行日期}"
+      # 模板正文是 {{执行人数}}，不是 {{活动人数}}
+      执行人数: "{执行人数}"
+      活动名称: "{活动名称}"
+      签订日期: "@today"
+      # 旧合并正文占位强制清空；明细改由文末内嵌 Sheet 写入
+      活动行程与费用明细: ""
+      # 以下 key 当前模板正文中没有对应 {{}}；模板补上后即可生效
+      甲方联系人: "{联系人}"
+      甲方电话: "{联系方式}"
+      策划师: "{策划师}"
+
+  趣加文化创意:
+    template_token: "PGLqd2qTto8SSKxu2IQcPDIBn8c"
+    output_folder: 趣加文化创意合同
+    document_name_pattern: "趣加文化创意活动合同{订单号}"
+    party_b_full_name: "杭州趣加文化创意有限公司"
+    # 文末追加费用明细 / 行程明细内嵌 Sheet（fields.费用明细 / fields.活动行程）
+    append_detail_sheets: true
+    detail_sheets:
+      style:
+        h_align: center          # sheet cells: left | center | right
+        v_align: center          # top | center | bottom
+        font_size: "10pt/1.5"
+        header_bold: true
+        title_align: left        # H2 title: left | center | right
+      fee:
+        title: 费用明细
+        columns:
+          - { field: 分类, header: 分类, width: 75 }
+          - { field: 名称, header: 名称, width: 120 }
+          - { field: 描述, header: 描述, width: 330 }
+          - { field: 数量, header: 数量, width: 50 }
+          - { field: 单价, header: 单价, width: 60 }
+          - { field: 总价, header: 总价, width: 70 }
+      itinerary:
+        title: 行程明细
+        columns:
+          - { field: 日期, header: 日期, width: 50 }
+          - { field: 时间, header: 时间, width: 100 }
+          - { field: 内容, header: 内容, width: 300 }
+    placeholders:
+      甲方名称: "{单位}"
+      甲方地址: "{甲方地址}"
+      甲方税号: "{甲方税号}"
+      乙方名称: "@party_b_full_name"
+      乙方地址: "浙江省杭州市滨江区长河街道长江路336号5幢503室"
+      乙方银行账号: "551167449900015"
+      乙方开户行: "台州银行杭州滨江支行"
+      乙方税号: "91330108MA2HYWPY6Y"
+      活动费用: "{合同价款}"
+      付款方式: "{付款方式}"
+      活动日期: "{执行日期}"
+      # 模板正文是 {{执行人数}}，不是 {{活动人数}}
+      执行人数: "{执行人数}"
+      活动名称: "{活动名称}"
+      签订日期: "@today"
+      # 旧合并正文占位强制清空；明细改由文末内嵌 Sheet 写入
+      活动行程与费用明细: ""
       # 以下 key 当前模板正文中没有对应 {{}}；模板补上后即可生效
       甲方联系人: "{联系人}"
       甲方电话: "{联系方式}"
@@ -48,8 +192,8 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
 
   出团计划单:
     template_token: "BEQndWqYsoXzaSxGrf3c4srLngg"
-    folder_token: "IBTBfdFszl5hujdAp1GcrRAAnfc"
-    document_name_pattern: "出团计划单-{订单号}"
+    output_folder: 出团计划单
+    document_name_pattern: "出团计划单{订单号}"
     required_placeholders:
       - 订单编号
       - 客户名称
@@ -68,39 +212,91 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       行程内容: "{行程内容}"
       活动项目: "{活动项目}"
       策划师: "{策划师}"
+    # 文末追加预定结算内嵌 Sheet（勿在模板预埋结算表）
+    append_detail_sheets: true
+    detail_sheets:
+      style:
+        h_align: center
+        v_align: center
+        font_size: "10pt/1.5"
+        header_bold: true
+        title_align: center          # H2「预定结算」对齐：left | center | right
+      settlement:
+        title: 预定结算
+        # title_align: left         # 可覆盖 style.title_align
+        columns:
+          - { field: 物品名称, header: 物品名称, width: 150 }
+          - { field: 内容, header: 内容, width: 200 }
+          - { field: 数量, header: 数量, width: 40 }
+          - { field: 单价, header: 单价, width: 50 }
+          - { field: 小计, header: 小计, width: 60 }
+          - { field: 预定状态, header: 预定状态, width: 70 }
+          - { field: 结算方式, header: 结算方式, width: 70 }
+          - { field: 联系人, header: 联系人, width: 70 }
+          - { field: 预定信息, header: 预定信息, width: 250 }
+
+  在线报价:
+    type: spreadsheet
+    template_token: "DHnusjhhShGzT2t5HCzcqsnHncg"
+    output_folder: 在线报价
+    document_name_pattern: "{活动名称}-{订单号}"
+    required_placeholders: []
+    placeholders:
+      活动名称: "{活动名称}"
+      报价人数: "{报价人数}"
+      活动天数: "{活动天数}"
+      活动日期: "{活动日期}"
+      出发地目的地: "{出发地目的地}"
+      税费及服务: "{税费及服务}"
     sheet:
-      start_row: 2
-      max_rows: 50
-      clear_unused_rows: false
-      trim_unused_rows: true
-      template_data_rows: 20
+      # 第 9、10 行为空白锚点；二者之间插行写 A–E 与 G 后删除这两个锚点空行，再写公式
+      insert_after_row: 9
+      insert_before_row: 10
+      max_rows: 80
       columns:
-        - field: 名称
+        - field: 类目
           col: A
-        - field: 描述
+        - field: 物品名称
           col: B
-        - field: 数量
+        - field: 描述
           col: C
-        - field: 单价
+        - field: 数量
           col: D
-        - field: 结算方式
-          col: F
-        - field: 联系人
+        - field: 单价
+          col: E
+        - field: 数量
           col: G
-      # E 列小计 + 总价行由服务按实际行数写入公式，再删除模板多余空行
+      # inheritStyle 不继承公式；插行后由服务写入行公式与活动总价行公式
       formula:
-        subtotal_col: E
-        subtotal: '=IF(C{row}="","",C{row}*D{row})'
-        total_label_col: A
-        total_label: 总价
-        total_col: E
-        total: '=SUM(E{start}:E{end})'
+        line_total_col: F
+        line_total: '=IF(OR(D{row}="",E{row}=""),"",D{row}*E{row})'
+        profit_line_col: I
+        profit_line: '=IF(OR(G{row}="",H{row}=""),"",G{row}*H{row})'
+        total_label: 活动总价（含税）
+        tax_label: 税费及服务
+        total_amount_col: D
+        profit_sum_col: H
+        total_diff_col: I
+        profit_sum: "=SUM(I{start}:I{end})"
+        total_diff: "=D{row}-H{row}"
+      # 原始模板第 15 行上方插行程；运行时按报价净增行数偏移
+      itinerary:
+        insert_before_row: 15
+        max_rows: 80
+        columns:
+          - field: 日期
+            col: A
+          - field: 时间
+            col: B
+          - field: 内容
+            col: C
 
 signing_unit_map:
   杭州趣加旅行社服务有限公司: 趣加旅社
   杭州趣加文化创意有限公司: 趣加文化创意
   杭州趣顽企业管理咨询有限公司: 趣顽
   旅苑国际旅行社有限公司第一分公司: 旅苑
-  杭州趣加体育活动策划有限公司: 趣加体育文化
+  杭州趣伽团建策划有限公司: 趣伽团建
   杭州趣加企业管理咨询有限公司: 趣加管理咨询
   出团计划单: 出团计划单
+  在线报价: 在线报价

@@ -22,18 +22,23 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice
     max_attempts: 3
     timeout_seconds: 10
-  - name: quote-generation-test-bitable-record-changed # 报价单生成测试
+  - name: online-quote-generation # 在线报价 Spreadsheet 生成（附件 / 按需双模式，n8n 内分支）
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
     app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
     table_id: tbl91gZyDPCLhlva
+    # 仅编辑；避免与新建等 action 叠加匹配
+    actions: record_edited
     field_conditions:
       - field_id: fldGQVeaKb
-        equals: optDK1JeDR
+        equals:
+          - optDK1JeDR
+          - optSrF4NkL
     n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-test
-    max_attempts: 3
-    timeout_seconds: 10
+    # 生成含下载/插行/可选 AI，常 >10s；超时重试会导致同一提交触发多次工作流
+    max_attempts: 2
+    timeout_seconds: 180
   - name: record_deleted_backup #删除数据存档
     enabled: true
     dispatch_enabled: true
@@ -79,7 +84,7 @@ routes:
     field_conditions:
       - field_id: fldKtkrkNU
         equals: opt3Grubt2
-    n8n_webhook_url: http://n8n:5678/webhook/make-contract
+    n8n_webhook_url: http://n8n:5678/webhook/make-contract-online
     max_attempts: 3
     timeout_seconds: 10
   - name: invoice-tax-status-check # 发票税务状态校验（群内发「发票号校验」+ Excel；主应用 n8n）

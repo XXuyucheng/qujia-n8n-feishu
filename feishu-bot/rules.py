@@ -1,7 +1,7 @@
 """Skill YAML 业务规则：关键词命中 → 自动设字段 / 名称 pattern 校验。
 
 示例（供应商 skill）：消息含「客户退款」→ supplier_type=客户退款，
-且 supplier_name 须匹配「客户退款+订单号数字」。
+且 supplier_name 须匹配「客户退款+订单号」或「订单号+客户退款」。
 """
 
 from __future__ import annotations

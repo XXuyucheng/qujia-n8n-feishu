@@ -1,0 +1,501 @@
+{
+  "name": "出团计划单生成-在线报价",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -16,
+        -144
+      ],
+      "id": "d5452764-9454-4eea-834a-692ebf3fb148",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        80
+      ],
+      "id": "efdc4ebe-e759-4fe7-8dbe-81e486c7dd05",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/Y2ZgbUGWqa0MB4sLmXxc89T5n0P/tables/tbl821KbTBpjjyXI/records/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$node[\"获取飞书Token\"].json[\"tenant_access_token\"]}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"filter\": {\n    \"conjunction\": \"or\",\n    \"conditions\": [\n      {\n        \"field_name\": \"计划单生成状态\",\n        \"operator\": \"is\",\n        \"value\": [\"提交生成\"]\n      },\n     {\n        \"field_name\": \"计划单生成状态\",\n        \"operator\": \"is\",\n        \"value\": [\"待生成\"]\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        528,
+        80
+      ],
+      "id": "659ca9a1-e71f-4f8a-ad89-efb3fe9de6f4",
+      "name": "查询待识别执行记录"
+    },
+    {
+      "parameters": {
+        "jsCode": "/**\n * 出团计划单 — 出团信息聚合\n *\n * 职责：\n * 1. 从执行表 + 预定信息生成结果组装生成请求（fields / sheet_rows）\n * 2. 按策划师 open_id 映射输出目录 folder_token（与「在线报价生成」同一套表）\n * 3. 缺策划师 / 缺输出目录时 ok=false，供 If 分流后回写「计划单生成状态」\n *\n * 依赖节点：\n *   - $input ← 「预定信息生成」\n *   - $('查询待识别执行记录')\n *   - $('解析在线报价链接')\n *   - $('获取飞书Token')\n *\n * 使用：粘贴到 n8n「出团信息聚合」Code 节点；与 workflows/出团计划单生成-在线报价.json 同步维护。\n */\n\nconst quote = $input.first().json; // 来自「预定信息生成」\nconst execResp = $('查询待识别执行记录').first().json;\nconst execItem = execResp?.data?.items?.[0] || {};\nconst execFields = execItem.fields || {};\nconst execRecordId = quote._meta?.exec_record_id || execItem.record_id || '';\nconst orderRecordId =\n  quote._meta?.order_record_id ||\n  $('解析在线报价链接').first().json.order_record_id ||\n  '';\nconst token = $('获取飞书Token').first().json.tenant_access_token || '';\n\n/** 策划师 open_id → 飞书云空间输出目录 folder_token（与在线报价生成一致） */\nconst PLANNER_OUTPUT_FOLDER = {\n  'ou_31f3068ea0ae6fa7ffb24afaa2715c2d': 'OvlefG0vnl8DVudsbgyc5CUpndb',\n  'ou_a67e7c9602d7f44315ecd5a29adc912c': 'BDTPfGghllN9HVd5CQacURbGnZe',\n};\n\nconst errors = [];\n\nfunction textOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v).trim();\n  if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join('；');\n  if (typeof v === 'object') {\n    if (Array.isArray(v.value)) return textOf(v.value);\n    if (v.text != null) return String(v.text).trim();\n    if (v.name != null) return String(v.name).trim();\n  }\n  return '';\n}\n\nfunction dateOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'number') {\n    return new Date(v).toISOString().slice(0, 10).replace(/-/g, '/');\n  }\n  if (\n    typeof v === 'object' &&\n    Array.isArray(v.value) &&\n    typeof v.value[0] === 'number'\n  ) {\n    return new Date(v.value[0]).toISOString().slice(0, 10).replace(/-/g, '/');\n  }\n  return textOf(v).replace(/-/g, '/');\n}\n\nfunction isPercentFeeItem(item) {\n  const text = [item?.名称, item?.描述, item?.分类]\n    .map((s) => String(s || '').trim())\n    .join(' ');\n  if (!text) return false;\n  return /税费|服务费|管理费|税率|增值税|附加费|[%％]|百分比/.test(text);\n}\n\nfunction itemsByCategory(items, keyword) {\n  return items.filter((item) => String(item.分类 || '').includes(keyword));\n}\n\nfunction joinItemNames(items, sep = '；') {\n  return items\n    .map((item) => `${item.名称 || ''}${item.数量 != null ? `×${item.数量}` : ''}`)\n    .filter(Boolean)\n    .join(sep);\n}\n\nconst plannerField = execFields['策划'] || execFields['策划师'] || [];\nconst plannerId =\n  (Array.isArray(plannerField) ? plannerField[0] : null)?.id ||\n  (Array.isArray(plannerField) ? plannerField[0] : null)?.open_id ||\n  '';\nconst folder_token = PLANNER_OUTPUT_FOLDER[plannerId] || '';\n\nif (!plannerId) errors.push('缺少策划师');\nelse if (!folder_token) errors.push('缺少输出目录');\n\nconst 报价明细条目 = (quote.报价明细条目 || []).filter(\n  (item) => !isPercentFeeItem(item),\n);\n\nconst customerRaw = textOf(execFields['客户信息']);\nconst parts = customerRaw\n  .split(/[；;]/)\n  .map((s) => s.trim())\n  .filter(Boolean);\nconst 单位 = parts[0] || textOf(execFields['单位']);\nconst 联系人 = parts[1] || textOf(execFields['联系人']);\nconst 联系方式 = parts[2] || textOf(execFields['联系方式']);\n\nconst sheet_rows = 报价明细条目.map((item) => ({\n  名称: item.名称 || '',\n  描述: item.描述 || '',\n  数量: item.数量,\n  单价: item.单价,\n  结算方式: item.结算方式 || '',\n  联系人: item.联系人 || '',\n  预定信息: item.预定信息 || '',\n}));\n\nconst 工作人员安排 = joinItemNames(itemsByCategory(报价明细条目, '人员安排'));\nconst 活动项目 = joinItemNames(itemsByCategory(报价明细条目, '活动选配'), '\\t');\nconst 车型 = joinItemNames(itemsByCategory(报价明细条目, '交通'));\n\nconst 导游 = textOf(execFields['导游']);\nconst 摄影 = textOf(execFields['摄影']);\nconst 教练 = textOf(execFields['教练']);\nconst 导游摄影 = [导游, 摄影].filter(Boolean).join('；');\nconst 工作人员 = [工作人员安排, 导游摄影].filter(Boolean).join('；');\n\nconst ok = errors.length === 0;\nconst errorMessage = errors.join('；');\n\nreturn [\n  {\n    json: {\n      ok,\n      errors,\n      error_message: errorMessage,\n      planner_id: plannerId,\n      tenant_access_token: token,\n      signing_unit: '出团计划单',\n      folder_token,\n      fields: {\n        订单号: textOf(execFields['订单号']),\n        单位,\n        联系人,\n        联系方式,\n        客户对接人: [联系人, 联系方式].filter(Boolean).join('：'),\n        工作人员,\n        车型,\n        教练,\n        活动项目,\n        策划师: textOf(execFields['策划']) || textOf(execFields['策划师']),\n        执行日期:\n          dateOf(execFields['执行日期']) || quote.执行日期_报价单 || '',\n        执行人数: quote.人数 || textOf(execFields['执行人数']),\n        活动名称: quote.活动名称 || '',\n        行程内容: quote.活动行程 || '',\n        报价明细条目,\n        执行编号: textOf(execFields['执行编号']),\n        执行记录_id: execRecordId,\n        订单记录_id: orderRecordId,\n      },\n      sheet_rows,\n    },\n  },\n];\n"
+      },
+      "id": "4db7f398-f4bf-4070-8c00-7130dde33a51",
+      "name": "出团信息聚合",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://feishu-files-generation:8030/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ tenant_access_token: $json.tenant_access_token, signing_unit: $json.signing_unit, folder_token: $json.folder_token, fields: $json.fields, sheet_rows: $json.sheet_rows }) }}",
+        "options": {}
+      },
+      "id": "4f771dc6-f7b9-4975-9ea3-a615e641d691",
+      "name": "生成出团计划单",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('查询待识别执行记录').item.json.data.items[0].record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fields\": {\n    \"计划单生成状态\": \"已生成\",\n    \"出团计划单\": {\n      \"text\": \"{{ $json.document_name }}\",\n      \"link\": \"{{ $json.document_url }}\"\n    }\n  }\n}",
+        "options": {}
+      },
+      "id": "f6e22684-5eb1-42d9-952b-34211057a5ec",
+      "name": "回写出团结果",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2688,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "make-plan",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -16,
+        80
+      ],
+      "id": "9662eded-6715-4e04-a264-c468f99b8bcf",
+      "name": "Webhook",
+      "webhookId": "542f27a3-dd7a-4095-a670-1bc63c6048e6"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst quote = $input.first().json;\n\n// 本工作流暂无 Loop；取「查询待识别执行记录」第一条\nconst execResp = $('查询待识别执行记录').first().json;\nconst execItem = execResp?.data?.items?.[0] || {};\nconst execFields = execItem.fields || {};\n\n/** 飞书多维表格字段 / 字符串清洗 */\nfunction textOf(v) {\n  if (v == null || v === '') return '';\n  if (typeof v === 'string' || typeof v === 'number') return String(v).trim();\n  if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join('；');\n  if (typeof v === 'object') {\n    if (Array.isArray(v.value)) return textOf(v.value);\n    if (v.text != null) return String(v.text).trim();\n    if (v.name != null) return String(v.name).trim();\n  }\n  return '';\n}\n\n/**\n * 解析为 { y, m, d }。\n * 支持：毫秒时间戳、飞书日期对象、`2026-08-30` / `2026年8月30日` 等文本。\n */\nfunction toDateParts(v) {\n  if (v == null || v === '') return null;\n  if (typeof v === 'number') {\n    const d = new Date(v > 1e12 ? v : v);\n    if (Number.isNaN(d.getTime())) return null;\n    return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() };\n  }\n  if (typeof v === 'object' && Array.isArray(v.value) && typeof v.value[0] === 'number') {\n    return toDateParts(v.value[0]);\n  }\n  const s = textOf(v).replace(/[年./]/g, '-').replace(/日/g, '');\n  const m = s.match(/(\\d{4})\\D+(\\d{1,2})\\D+(\\d{1,2})/);\n  if (!m) return null;\n  return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };\n}\n\n/** 在本地日历上对 {y,m,d} 加 days 天（避免 UTC 偏移） */\nfunction addDays(parts, days) {\n  if (!parts) return null;\n  const dt = new Date(parts.y, parts.m - 1, parts.d);\n  dt.setDate(dt.getDate() + Number(days || 0));\n  return {\n    y: dt.getFullYear(),\n    m: dt.getMonth() + 1,\n    d: dt.getDate(),\n  };\n}\n\nfunction formatZhParts(parts) {\n  if (!parts) return '';\n  return `${parts.y}年${parts.m}月${parts.d}日`;\n}\n\nfunction formatZhDate(v) {\n  const p = toDateParts(v);\n  if (!p) return textOf(v);\n  return formatZhParts(p);\n}\n\n/**\n * 从明细名称中提取 day 序号（1-based）。\n * 匹配：DAY1、day2、D3、第4天 等；找不到返回 null。\n */\nfunction extractDayIndex(name) {\n  const text = String(name || '');\n  // DAY1 / day 2 / D3（避免把普通单词里的 d 误伤：要求 day/d 后直接跟数字）\n  let m = text.match(/\\bday\\s*[-_]?\\s*(\\d+)\\b/i) || text.match(/\\bd\\s*(\\d+)\\b/i);\n  if (m) return Number(m[1]);\n  m = text.match(/第\\s*(\\d+)\\s*天/);\n  if (m) return Number(m[1]);\n  return null;\n}\n\n/**\n * 按名称中的 dayN 相对执行日计算预定日期。\n * dayIndex=1 → 执行日；dayIndex=2 → 执行日+1；无 day → 执行日。\n */\nfunction bookingDateForItem(itemName, execDateParts) {\n  if (!execDateParts) return '';\n  const dayIndex = extractDayIndex(itemName);\n  const offset = dayIndex != null && dayIndex >= 1 ? dayIndex - 1 : 0;\n  return formatZhParts(addDays(execDateParts, offset));\n}\n\nconst 订单号 = textOf(execFields['订单号']);\nconst 策划师 = textOf(execFields['策划']) || textOf(execFields['策划师']);\n\n// 执行日期（基准日）；明细无 day 标记时也用这一天\nconst execDateRaw = execFields['执行日期'] || quote.执行日期_报价单 || '';\nconst execDateParts = toDateParts(execDateRaw);\nconst 执行日期文案 = formatZhParts(execDateParts) || formatZhDate(execDateRaw);\n\nfunction buildBookingText(item) {\n  const name = item?.名称 || '';\n  const qty = item?.数量 != null && item?.数量 !== '' ? item.数量 : '';\n  const line = qty === '' ? `1. ${name}` : `1. ${name}*${qty}`;\n  // 名称含 DAY2 → 预定时间为执行日期次日，以此类推\n  const 预定时间 = bookingDateForItem(name, execDateParts) || 执行日期文案;\n  return [\n    `趣加团队预定订单号：${订单号}`,\n    `预定时间：${预定时间}`,\n    '预定内容：',\n    line,\n    `团队策划：${策划师}`,\n    '如已收到请回复预定情况，谢谢！',\n  ].join('\\n');\n}\n\nconst 报价明细条目 = (quote.报价明细条目 || []).map((item) => ({\n  ...item,\n  预定信息: buildBookingText(item),\n}));\n\n// 行程：提取节点只有条目时，拼成正文供 {{行程内容}} 使用\nconst tripItems = quote.活动行程条目 || [];\nconst 活动行程 =\n  quote.活动行程 ||\n  tripItems\n    .map((item) => {\n      const day = item.日期 || item.day || '行程';\n      const time = item.时间 || '';\n      const content = item.内容 || '';\n      return `${String(day).padEnd(6, ' ')}${String(time || '-').padEnd(14, ' ')}${content}`;\n    })\n    .filter((line) => line.trim())\n    .join('\\n');\n\nreturn [\n  {\n    json: {\n      ...quote,\n      报价明细条目,\n      活动行程,\n      _meta: {\n        exec_record_id: execItem.record_id || '',\n        order_record_id: $('解析在线报价链接').first().json.order_record_id || '',\n      },\n    },\n  },\n];\n"
+      },
+      "id": "a5fc31a6-134a-40f1-8101-aa4b348f11fd",
+      "name": "预定信息生成",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseSpreadsheetToken(field) {\n  const candidates = [];\n\n  function collect(value) {\n    if (value == null) return;\n    if (typeof value === 'string') {\n      candidates.push(value.trim());\n      return;\n    }\n    if (Array.isArray(value)) {\n      value.forEach(collect);\n      return;\n    }\n    if (typeof value === 'object') {\n      for (const key of ['link', 'url', 'value', 'text', 'token']) {\n        if (key in value) collect(value[key]);\n      }\n    }\n  }\n\n  collect(field);\n  for (const candidate of candidates) {\n    if (!candidate) continue;\n    let decoded = candidate;\n    try {\n      decoded = decodeURIComponent(candidate);\n    } catch {\n      // keep original\n    }\n    const urlMatch = decoded.match(/\\/sheets\\/([A-Za-z0-9_-]+)/i);\n    if (urlMatch) return urlMatch[1];\n    // 飞书 spreadsheet token 未必以 sht 开头（复制文件后常见）\n    if (/^[A-Za-z0-9_-]{10,}$/.test(decoded) && !/\\s/.test(decoded) && !/^https?:/i.test(decoded)) {\n      return decoded;\n    }\n  }\n\n  throw new Error('订单「在线报价」中无法提取 spreadsheet_token');\n}\n\nconst response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error('读取关联订单失败 [' + response.code + ']: ' + (response.msg || '未知错误'));\n}\nconst record = response.data?.items?.[0];\nif (!record) {\n  throw new Error('未找到执行记录关联的订单');\n}\nconst onlineQuote = record.fields?.['在线报价'];\nif (onlineQuote == null || onlineQuote === '') {\n  throw new Error('关联订单缺少「在线报价」链接字段');\n}\nconst spreadsheetToken = parseSpreadsheetToken(onlineQuote);\n\nreturn [{\n  json: {\n    spreadsheet_token: spreadsheetToken,\n    order_record_id: record.record_id || '',\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        80
+      ],
+      "id": "80b573fe-8c9e-4828-970d-bd1ffdecc59c",
+      "name": "解析在线报价链接"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/{{ $json.spreadsheet_token }}/sheets/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $(\"获取飞书Token\").first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        944,
+        80
+      ],
+      "id": "b29e7c76-1867-4341-95e4-cd2ddbd25b85",
+      "name": "查询在线报价工作表"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error('查询在线报价工作表失败 [' + response.code + ']: ' + (response.msg || '未知错误'));\n}\nconst sheets = (response.data?.sheets || []).filter((s) => s && s.hidden !== true);\nconst first = sheets[0] || (response.data?.sheets || [])[0] || {};\nconst sheetId =\n  first.sheet_id ||\n  first.sheetId ||\n  first.sheet?.sheet_id ||\n  '';\nif (!sheetId) {\n  throw new Error('在线报价电子表格中未找到 worksheet sheet_id');\n}\n\nreturn [{\n  json: {\n    spreadsheet_token: $('解析在线报价链接').item.json.spreadsheet_token,\n    sheet_id: sheetId,\n    sheet_title: first.title || '',\n  },\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        80
+      ],
+      "id": "afa3905f-b926-402a-be27-c8bc576a7279",
+      "name": "解析工作表ID"
+    },
+    {
+      "parameters": {
+        "url": "=https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{{ $json.spreadsheet_token }}/values_batch_get",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "ranges",
+              "value": "={{ $json.sheet_id + \"!A1:I200\" }}"
+            },
+            {
+              "name": "valueRenderOption",
+              "value": "UnformattedValue"
+            },
+            {
+              "name": "dateTimeRenderOption",
+              "value": "FormattedString"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $(\"获取飞书Token\").first().json.tenant_access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1360,
+        80
+      ],
+      "id": "465acfbd-7ee0-4099-9477-63e6d170d203",
+      "name": "读取在线报价单元格"
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseOnlineQuoteValues(values) {\n  if (!Array.isArray(values) || values.length === 0) {\n    throw new Error('在线报价单元格数据为空');\n  }\n\n  function rawCell(row, index) {\n    const value = Array.isArray(row) ? row[index] : undefined;\n    if (value == null) return '';\n    if (typeof value !== 'object') return value;\n    if (value.value != null) {\n      if (Array.isArray(value.value)) return value.value[0] ?? '';\n      return value.value;\n    }\n    if (value.text != null) return value.text;\n    return '';\n  }\n\n  function text(value) {\n    if (value == null || value === '') return '';\n    if (typeof value === 'string' || typeof value === 'number') {\n      return String(value).trim();\n    }\n    if (Array.isArray(value)) return value.map(text).filter(Boolean).join('');\n    if (typeof value === 'object') {\n      if (value.value != null) return text(value.value);\n      if (value.text != null) return text(value.text);\n    }\n    return '';\n  }\n\n  function cell(row, index) {\n    return text(rawCell(row, index));\n  }\n\n  function numberOf(value) {\n    if (typeof value === 'number') return Number.isFinite(value) ? value : null;\n    const source = text(value);\n    if (!source) return null;\n    const normalized = source\n      .replace(/[¥￥元,，\\s]/g, '')\n      .replace(/％/g, '%');\n    if (/^-?\\d+(?:\\.\\d+)?%$/.test(normalized)) {\n      return Number(normalized.slice(0, -1)) / 100;\n    }\n    const number = Number(normalized);\n    return Number.isFinite(number) ? number : null;\n  }\n\n  function rowTexts(row) {\n    const width = Math.max(Array.isArray(row) ? row.length : 0, 9);\n    return Array.from({ length: width }, (_, index) => cell(row, index));\n  }\n\n  function rowBlob(row) {\n    return rowTexts(row).filter(Boolean).join(' ');\n  }\n\n  function findMeta(label, beforeIndex) {\n    for (let rowIndex = 0; rowIndex < beforeIndex; rowIndex += 1) {\n      const row = values[rowIndex];\n      const texts = rowTexts(row);\n      const labelIndex = texts.findIndex(\n        (value) => value.replace(/\\s*[:：]\\s*$/, '').trim() === label,\n      );\n      if (labelIndex < 0) continue;\n      for (let column = labelIndex + 1; column < texts.length; column += 1) {\n        if (texts[column]) return rawCell(row, column);\n      }\n    }\n    return '';\n  }\n\n  const detailHeaderIndex = values.findIndex((row) => {\n    const blob = rowBlob(row);\n    return (\n      blob.includes('类目') &&\n      blob.includes('物品名称') &&\n      blob.includes('描述') &&\n      blob.includes('数量') &&\n      blob.includes('单价')\n    );\n  });\n  if (detailHeaderIndex < 0) {\n    throw new Error('在线报价中未找到明细表头（类目/物品名称/描述/数量/单价）');\n  }\n\n  const headerTexts = rowTexts(values[detailHeaderIndex]);\n  const findColumn = (labels, fallback) => {\n    const index = headerTexts.findIndex((value) =>\n      labels.some((label) => value === label || value.includes(label)),\n    );\n    return index >= 0 ? index : fallback;\n  };\n  const columns = {\n    category: findColumn(['类目', '分类'], 0),\n    name: findColumn(['物品名称', '名称'], 1),\n    description: findColumn(['描述', '内容'], 2),\n    quantity: findColumn(['数量'], 3),\n    unitPrice: findColumn(['单价'], 4),\n    lineTotal: findColumn(['总价', '小计', '金额'], 5),\n  };\n\n  const totalIndex = values.findIndex(\n    (row, index) => index > detailHeaderIndex && rowBlob(row).includes('活动总价'),\n  );\n  if (totalIndex < 0) {\n    throw new Error('在线报价中未找到「活动总价」行');\n  }\n\n  const totalRow = values[totalIndex];\n  let activityTotal = null;\n  for (const column of [3, 4, 5, 6, 7, 8]) {\n    const candidate = numberOf(rawCell(totalRow, column));\n    if (candidate != null) {\n      activityTotal = candidate;\n      break;\n    }\n  }\n  if (activityTotal == null) {\n    throw new Error('在线报价「活动总价」行没有可读取的公式计算值（请确认已填单价且用 UnformattedValue 读取）');\n  }\n\n  const feeObjects = [];\n  let lastCategory = '';\n\n  for (let index = detailHeaderIndex + 1; index < totalIndex; index += 1) {\n    const row = values[index];\n    const categoryValue = cell(row, columns.category);\n    if (categoryValue) lastCategory = categoryValue.replace(/^\\d+\\s*[.、．]\\s*/, '').trim();\n    const category = lastCategory || '费用';\n    const name = cell(row, columns.name);\n    const description = cell(row, columns.description)\n      .replace(/[\\r\\n]+/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim();\n    const quantity = numberOf(rawCell(row, columns.quantity));\n    const unitPrice = numberOf(rawCell(row, columns.unitPrice));\n    const lineTotal = numberOf(rawCell(row, columns.lineTotal));\n    const isTax = /税费|服务费/.test(category + ' ' + name);\n\n    if (!name && !description && quantity == null && unitPrice == null && lineTotal == null) {\n      continue;\n    }\n    if (!isTax && lineTotal === 0) continue;\n\n    feeObjects.push({\n      分类: category,\n      名称: name || '(未命名)',\n      描述: description,\n      数量: quantity,\n      单价: unitPrice,\n      总价: lineTotal,\n    });\n  }\n\n  const itinerarySectionIndex = values.findIndex(\n    (row, index) => index > totalIndex && rowBlob(row).includes('活动行程'),\n  );\n  if (itinerarySectionIndex < 0) {\n    throw new Error('在线报价中未找到「活动行程」区域');\n  }\n\n  const itineraryHeaderIndex = values.findIndex((row, index) => {\n    if (index <= itinerarySectionIndex) return false;\n    const blob = rowBlob(row);\n    return blob.includes('日期') && blob.includes('时间') && blob.includes('内容');\n  });\n  if (itineraryHeaderIndex < 0) {\n    throw new Error('在线报价中未找到行程表头（日期/时间/内容）');\n  }\n\n  const itineraryHeaders = rowTexts(values[itineraryHeaderIndex]);\n  const itineraryColumns = {\n    date: itineraryHeaders.findIndex((value) => value.includes('日期')),\n    time: itineraryHeaders.findIndex((value) => value.includes('时间')),\n    content: itineraryHeaders.findIndex((value) => value.includes('内容')),\n  };\n  const tripObjects = [];\n  let lastDay = '';\n\n  for (let index = itineraryHeaderIndex + 1; index < values.length; index += 1) {\n    const row = values[index];\n    const dateValue = cell(row, itineraryColumns.date >= 0 ? itineraryColumns.date : 0);\n    const timeValue = cell(row, itineraryColumns.time >= 0 ? itineraryColumns.time : 1);\n    const content = cell(row, itineraryColumns.content >= 0 ? itineraryColumns.content : 2)\n      .replace(/[\\r\\n]+/g, ' ')\n      .replace(/\\s+/g, ' ')\n      .trim();\n    if (!dateValue && !timeValue && !content) continue;\n    if (dateValue) lastDay = dateValue;\n    if (!content) continue;\n\n    const day = /^d\\d+$/i.test(lastDay)\n      ? lastDay.toLowerCase().replace(/^d/, 'day')\n      : lastDay || '行程';\n\n    tripObjects.push({\n      日期: day,\n      时间: timeValue,\n      内容: content,\n    });\n  }\n\n  const activityName = text(findMeta('活动名称', detailHeaderIndex));\n  const peopleRaw = findMeta('报价人数', detailHeaderIndex);\n  const people = numberOf(peopleRaw) ?? text(peopleRaw);\n  const activityDays = text(findMeta('活动天数', detailHeaderIndex));\n  const activityDate = text(findMeta('活动日期', detailHeaderIndex));\n  const originDestination = text(findMeta('出发地目的地', detailHeaderIndex));\n  const [departure = '', destination = ''] = originDestination\n    .split(/[-—–～~]/)\n    .map((value) => value.trim());\n\n  return {\n    活动名称: activityName,\n    人数: people,\n    活动天数: activityDays,\n    执行日期_报价单: activityDate,\n    出发地: departure,\n    目的地: destination,\n    出发地目的地: originDestination,\n    活动总价: activityTotal,\n    报价明细条目: feeObjects,\n    活动行程条目: tripObjects,\n    extracted: [\n      { key: '活动名称', value: activityName },\n      { key: '人数', value: people },\n      { key: '活动天数', value: activityDays },\n      { key: '执行日期', value: activityDate },\n      {\n        key: '出发地目的地',\n        value: originDestination,\n        出发地: departure,\n        目的地: destination,\n      },\n      { key: '活动总价', value: activityTotal },\n      { key: '报价明细条目', value: feeObjects },\n      { key: '活动行程条目', value: tripObjects },\n    ],\n  };\n}\n\nconst response = $input.first().json;\nif (response.code != null && response.code !== 0) {\n  throw new Error('读取在线报价单元格失败 [' + response.code + ']: ' + (response.msg || '未知错误'));\n}\nconst valueRanges = response.data?.valueRanges || [];\nconst values = valueRanges[0]?.values || [];\nreturn [{ json: parseOnlineQuoteValues(values) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        80
+      ],
+      "id": "be0e131c-46ea-4e40-b9ce-6075e9247f28",
+      "name": "在线报价信息提取"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "31897ab8-4bf4-40f6-9d92-6601238616eb",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2208,
+        80
+      ],
+      "id": "77ab4cf0-ab4e-4efc-bacb-4b4ad2b2b800",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('查询待识别执行记录').item.json.data.items[0].record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { 计划单生成状态: $json.error_message } }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        224
+      ],
+      "id": "f6f33292-727c-4ab8-a86f-5fe52c3ff704",
+      "name": "回写错误"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "查询待识别执行记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询待识别执行记录": {
+      "main": [
+        [
+          {
+            "node": "解析在线报价链接",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "出团信息聚合": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "生成出团计划单": {
+      "main": [
+        [
+          {
+            "node": "回写出团结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "回写出团结果": {
+      "main": [
+        []
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "预定信息生成": {
+      "main": [
+        [
+          {
+            "node": "出团信息聚合",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析在线报价链接": {
+      "main": [
+        [
+          {
+            "node": "查询在线报价工作表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "查询在线报价工作表": {
+      "main": [
+        [
+          {
+            "node": "解析工作表ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析工作表ID": {
+      "main": [
+        [
+          {
+            "node": "读取在线报价单元格",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "读取在线报价单元格": {
+      "main": [
+        [
+          {
+            "node": "在线报价信息提取",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "在线报价信息提取": {
+      "main": [
+        [
+          {
+            "node": "预定信息生成",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "生成出团计划单",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "回写错误",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "d44fcd03-fb02-44b5-a0dd-6d4a22f0943d",
+  "meta": {
+    "instanceId": "cc92663593ba8b2f21ed99048d0a8c90b47f6fae04df4e2dfe5eae0e7d4fbff6"
+  },
+  "id": "KELX69kBerHLeSnW",
+  "tags": []
+}

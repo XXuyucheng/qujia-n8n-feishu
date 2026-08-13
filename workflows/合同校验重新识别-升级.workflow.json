@@ -1,0 +1,1247 @@
+{
+  "name": "合同校验重新识别（升级）",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "/**\n * 01 检查执行记录（手动重新识别 / Webhook 单条触发版）\n *\n * 【原理】\n * 1. feishu-listener 命中 Bill-Re-identification 规则后，POST 到 n8n Webhook。\n * 2. n8n Webhook 节点收到的 item 结构通常是：\n *    { headers, body: { route_name, event: { resource, raw, ... } }, ... }\n * 3. 本节点不再依赖「查询飞书 Search Records」的 record.fields，\n *    而是从 event.raw.event.action_list[0].after_value 读取变更后的字段快照。\n * 4. after_value 里是 field_id + field_value（飞书内部格式），需按字段 ID 解析。\n * 5. 解析完成后输出与批量工作流相同的 json，后续 Switch / 获取关联订单 等节点无需改动。\n */\n\n// 执行表 tbl821KbTBpjjyXI 字段 ID（与飞书多维表 / feishu-listener 一致）\nconst FIELD = {\n  关联订单: 'fld56wUBzA',   // 双向关联 → 订单表 record_id 数组\n  执行编号: 'fldKUOt2nO',   // 自动编号 → [{ number, sequence }]\n  执行人数: 'fldw1TGVjD',   // 数字\n  执行日期: 'fldwssO4L7',   // 日期 → { bus_type:[5], data:[{ value: 毫秒时间戳 }] }\n};\n\n/** 兼容 n8n Webhook 不同挂载方式：payload 可能在 body 内，也可能在根级 */\nfunction unwrapWebhook(input) {\n  if (input?.body?.event) return input.body;\n  if (input?.body?.route_name && input?.body?.event) return input.body;\n  if (input?.event) return input;\n  return input;\n}\n\n/** 从 feishu-listener 标准化 event 里取 action_list */\nfunction getActionList(payload) {\n  const list = payload?.event?.raw?.event?.action_list;\n  return Array.isArray(list) ? list : [];\n}\n\n/** record_id 优先取 resource，其次 action_list */\nfunction getRecordId(payload, actionList) {\n  const fromResource = payload?.event?.resource?.record_id;\n  if (fromResource) return String(fromResource).trim();\n  const fromAction = actionList[0]?.record_id;\n  return fromAction ? String(fromAction).trim() : '';\n}\n\n/** 将 after_value 数组转为 field_id → field_value 映射 */\nfunction buildFieldMap(afterValue) {\n  const map = {};\n  if (!Array.isArray(afterValue)) return map;\n  for (const item of afterValue) {\n    const id = item?.field_id;\n    if (id) map[id] = item.field_value ?? '';\n  }\n  return map;\n}\n\nfunction parseJsonSafe(raw) {\n  if (raw == null || raw === '') return null;\n  if (typeof raw === 'object') return raw;\n  try {\n    return JSON.parse(String(raw));\n  } catch (_) {\n    return null;\n  }\n}\n\n/** 执行编号：\"[{\\\"number\\\":\\\"ZX26060911\\\",\\\"sequence\\\":\\\"911\\\"}]\" → ZX26060911 */\nfunction pickExecNo(raw) {\n  const data = parseJsonSafe(raw);\n  if (Array.isArray(data) && data.length) {\n    const num = data[0]?.number ?? data[0]?.text;\n    if (num) return String(num).trim();\n  }\n  return String(raw || '').trim();\n}\n\n/** 关联订单：\"[\\\"recvne7ErMlVx5\\\"]\" → linkedOrderId */\nfunction pickLinkIds(raw) {\n  const data = parseJsonSafe(raw);\n  if (Array.isArray(data)) {\n    return data.map((x) => String(x).trim()).filter(Boolean);\n  }\n  return [];\n}\n\n/** 执行人数：可能是 \"40\" 或数字 */\nfunction pickExecPeople(raw) {\n  if (raw == null || raw === '') return '';\n  const n = Number(raw);\n  if (!Number.isNaN(n)) return String(n);\n  return String(raw).trim();\n}\n\n/** 执行日期：bus_type=5 的毫秒时间戳 → YYYY-MM-DD */\nfunction pickExecDate(raw) {\n  const data = parseJsonSafe(raw);\n  if (data && Array.isArray(data.data) && data.data[0]?.value != null) {\n    const ts = Number(data.data[0].value);\n    if (!Number.isNaN(ts)) {\n      return new Date(ts).toISOString().slice(0, 10);\n    }\n  }\n  const n = Number(raw);\n  if (!Number.isNaN(n) && n > 1e11) {\n    return new Date(n).toISOString().slice(0, 10);\n  }\n  return String(raw || '').trim();\n}\n\n// ── 主流程 ────────────────────────────────────────────────\n\nconst payload = unwrapWebhook($json);\nconst actionList = getActionList(payload);\nconst record_id = getRecordId(payload, actionList);\n\n// after_value = 本次编辑后该行的字段快照（含未变更字段）\nconst afterValue = actionList[0]?.after_value || [];\nconst fieldMap = buildFieldMap(afterValue);\n\nconst linkedOrderIds = pickLinkIds(fieldMap[FIELD.关联订单]);\nconst hasLinkedOrder = linkedOrderIds.length > 0;\n\nlet noContractReason = '';\nif (!record_id) {\n  noContractReason = 'Webhook 未解析到执行记录 record_id';\n} else if (!hasLinkedOrder) {\n  noContractReason = '执行记录缺少关联订单';\n}\n\nreturn {\n  json: {\n    record_id,\n    execNo: pickExecNo(fieldMap[FIELD.执行编号]),\n    执行人数: pickExecPeople(fieldMap[FIELD.执行人数]),\n    执行日期: pickExecDate(fieldMap[FIELD.执行日期]),\n    hasLinkedOrder,\n    noContractReason,\n    linkedOrderId: linkedOrderIds[0] || '',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "a76df342-aaef-4843-861f-e0effca34b9a",
+      "name": "01 检查执行记录"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('01 检查执行记录').item.json.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { 合同识别状态: \"无合同\", 校验信息: $('01 检查执行记录').item.json.noContractReason || \"关联订单无合同附件，或执行记录缺少关联订单\" } }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1056,
+        192
+      ],
+      "id": "4d3ca9cd-5afe-4683-9276-d2d7a04a5f5c",
+      "name": "标记无合同"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl91gZyDPCLhlva/records/batch_get",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"record_ids\": [\"{{ $('01 检查执行记录').item.json.linkedOrderId }}\"],\n  \"field_names\": [\"合同\", \"执行人数\", \"执行日期\", \"合同价款\"]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        -32
+      ],
+      "id": "c561dbac-c190-45fd-b12f-b9b7b45763ac",
+      "name": "获取关联订单"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $('01 检查执行记录').item.json.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"fields\": {\n    \"合同识别状态\": \"识别中\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2176,
+        -64
+      ],
+      "id": "f220ecd3-ba83-4e66-9cb6-c3e242f12fd9",
+      "name": "标记识别中"
+    },
+    {
+      "parameters": {
+        "url": "={{ $item(\"0\").$node[\"获取关联订单\"].json[\"data\"][\"records\"][\"0\"][\"fields\"][\"合同\"][\"0\"][\"tmp_url\"] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2416,
+        -64
+      ],
+      "id": "7fde896a-d705-46c7-861a-b46e55bcd7ff",
+      "name": "获取临时下载链接"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.data.tmp_download_urls[0].tmp_download_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        -64
+      ],
+      "id": "d6a45536-6b76-486e-a283-fca09a2568f1",
+      "name": "下载PDF"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://pdf-parser:8000/parse-contract-invoice",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2896,
+        -64
+      ],
+      "id": "3e5491e0-d8fb-4786-a4eb-644ae9d646f6",
+      "name": "调用合同解析服务"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $json.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.feishu_update_body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5680,
+        -64
+      ],
+      "id": "e97be7df-49df-4e1f-93fd-08694790a7cf",
+      "name": "回写B_状态与校验信息"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=={{ $json.pages.filter(p => p.page <= 3).map(p => '--- 第 ' + p.page + ' 页 ---\\n' + (p.text || '')).join('\\n\\n') }}",
+        "options": {
+          "systemMessage": "你是合同信息提取助手。根据用户提供的合同 OCR 文本，提取以下字段：\n1. 活动名称\n2. 活动日期（格式 YYYY-MM-DD）\n3. 活动人数（仅数字）\n4. 活动总费用（数字，保留两位小数）\n5. 付款比例和方式（重点看「三、甲方所负责事项」或预付款/尾款条款）\n6. 付款比例是否预警(true或false)-根据5.付款比例和方式，判断付款比例是否预警，判断方式为尾款占总款项的比例高于50%判断为true\n\n只返回 JSON，不要 markdown，格式如下：\n{\"活动名称\":\"\",\"活动日期\":\"\",\"活动人数\":\"\",\"活动总费用\":\"\",\"付款比例和方式\":\"\",\"付款比例是否预警\":\"\",\"说明\":\"\"}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        3360,
+        -200
+      ],
+      "id": "5dfc6df9-18af-4d5e-8a74-8b29d7806c94",
+      "name": "DeepSeek Agent_合同字段识别",
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const items = $input.all().map((i) => i.json);\nlet fields = items.find((x) => x.branch === 'fields') || {};\nlet stamp = items.find((x) => x.branch === 'stamp') || {};\n\n// Merge 后兜底：直接引用支路节点\ntry {\n  if (!fields.branch) fields = $('组装回写A载荷').first()?.json || fields;\n} catch (_) {}\ntry {\n  if (!stamp.branch) {\n    stamp = $('签章支路结果').first()?.json || $('签章支路跳过结果').first()?.json || stamp;\n  }\n} catch (_) {}\n\nfunction normalizeYesNo(value) {\n  const v = String(value || '').trim();\n  if (v === '是' || v === '否' || v === '不确定') return v;\n  return '不确定';\n}\n\nfunction extractComparableString(val) {\n  if (val === undefined || val === null) return '';\n  if (typeof val === 'object') {\n    if (Array.isArray(val)) return val.map(extractComparableString).join(',');\n    return String(val.text ?? val.value ?? val.name ?? val.label ?? '');\n  }\n  return String(val).trim();\n}\n\nconst 甲方 = normalizeYesNo(stamp.甲方盖章);\nconst 乙方 = normalizeYesNo(stamp.乙方盖章);\nconst 双方 = normalizeYesNo(stamp.双方盖章) !== '不确定'\n  ? normalizeYesNo(stamp.双方盖章)\n  : (甲方 === '是' && 乙方 === '是' ? '是' : (甲方 === '否' || 乙方 === '否' ? '否' : '不确定'));\nconst 甲方签字 = normalizeYesNo(stamp.甲方签字);\nconst 甲方身份证复印件 = normalizeYesNo(stamp.甲方身份证复印件);\nconst 签字合同状态 = stamp.签字合同状态 || '不适用';\n\nconst d = {\n  record_id: fields.record_id || stamp.record_id,\n  execNo: fields.execNo || stamp.execNo,\n  活动名称: fields.活动名称 || '',\n  活动日期: fields.活动日期 || '',\n  活动人数: fields.活动人数 || '',\n  活动总费用: fields.活动总费用 || '',\n  付款比例和方式: fields.付款比例和方式 || '',\n  付款比例是否预警: fields.付款比例是否预警,\n  字段识别说明: fields.字段识别说明 || '',\n  目的地: fields.目的地 || [],\n  dest_source: fields.dest_source || '',\n  预付款比例校验: fields.预付款比例校验 || '失败',\n  盖章说明: stamp.盖章说明 || '',\n  签章页识别明细: stamp.签章页识别明细 || [],\n  stamp_size_error: Boolean(stamp.stamp_size_error),\n};\n\nconst pageDetails = Array.isArray(d.签章页识别明细) ? d.签章页识别明细 : [];\nconst stampDetailText = pageDetails.length\n  ? pageDetails\n      .map(\n        (r) =>\n          `第${r.page}页：甲方盖章${normalizeYesNo(r.甲方盖章)}，乙方盖章${normalizeYesNo(r.乙方盖章)}，甲方签字${normalizeYesNo(r.甲方签字)}，身份证${normalizeYesNo(r.甲方身份证复印件)}${r.说明 ? `（${r.说明}）` : ''}`\n      )\n      .join('；')\n  : d.盖章说明 || '';\n\nconst lines = [\n  '【合同校验】',\n  d.execNo ? `执行编号：${d.execNo}` : '',\n  `双方盖章：${双方}`,\n  `甲方盖章：${甲方}`,\n  `乙方盖章：${乙方}`,\n  `甲方签字：${甲方签字}`,\n  `甲方身份证复印件：${甲方身份证复印件}`,\n  签字合同状态 && 签字合同状态 !== '不适用' ? `签字合同状态：${签字合同状态}` : '',\n  '签章判定依据：综合全部签章页聚合判断',\n  `活动名称：${d.活动名称 || '-'}`,\n  `活动日期：${d.活动日期 || '-'}`,\n  `活动人数：${d.活动人数 || '-'}`,\n  `活动总费用：${d.活动总费用 || '-'}`,\n  `付款比例和方式：${d.付款比例和方式 || '-'}`,\n  `预付款比例校验：${d.预付款比例校验 || '-'}`,\n];\n\nif (Array.isArray(d.目的地) && d.目的地.length) {\n  lines.push(`目的地：${d.目的地.join('、')}（${d.dest_source || '识别'}）`);\n} else {\n  lines.push('目的地：未识别（不回写）');\n}\n\nif (d.字段识别说明) lines.push(`字段识别说明：${d.字段识别说明}`);\nif (stampDetailText) lines.push(`盖章识别说明：${stampDetailText}`);\n\nconst missing = [\n  !d.活动名称 ? '活动名称' : '',\n  !d.活动日期 ? '活动日期' : '',\n  !d.活动人数 ? '活动人数' : '',\n  !d.活动总费用 ? '活动总费用' : '',\n  !d.付款比例和方式 ? '付款比例和方式' : '',\n].filter(Boolean);\n\nconst execCtx = $('02 检查订单合同').item?.json || {};\nconst refExecPeople = extractComparableString(execCtx.订单执行人数 || execCtx.执行人数 || '');\nconst refExecDate = extractComparableString(execCtx.订单执行日期 || execCtx.执行日期 || '');\nconst refContractPrice = extractComparableString(execCtx.订单合同价款 || '');\nconst crossIssues = [];\nif (refExecPeople && d.活动人数 && refExecPeople !== String(d.活动人数)) {\n  crossIssues.push(`活动人数(${d.活动人数})与执行人数(${refExecPeople})不一致`);\n}\nif (refExecDate && d.活动日期 && refExecDate !== String(d.活动日期)) {\n  crossIssues.push(`活动日期(${d.活动日期})与执行日期(${refExecDate})不一致`);\n}\nif (refContractPrice && d.活动总费用 && refContractPrice !== String(d.活动总费用)) {\n  crossIssues.push(`活动总费用(${d.活动总费用})与合同价款(${refContractPrice})不一致`);\n}\nif (crossIssues.length) lines.push(`交叉核验：${crossIssues.join('；')}`);\n\nconst isBothStamped = 双方 === '是';\nconst hasSign = 甲方签字 === '是';\nconst isValidSignContract = 签字合同状态 === '有效';\nconst isInvalidSignContract = 签字合同状态 === '无效签字合同';\nconst sizeErr = d.stamp_size_error || (d.盖章说明 && (d.盖章说明.includes('超过10MB') || d.盖章说明.includes('超过64MB')));\n\nlet recognizeStatus = '校验正确';\nif (sizeErr) {\n  recognizeStatus = '文件过大';\n} else if (isBothStamped) {\n  recognizeStatus = missing.length > 0 ? '签章正确⚠️内容识别失败' : '校验正确';\n} else if (missing.length >= 3 && !fields.fields_ok) {\n  recognizeStatus = '识别失败';\n} else if (甲方 === '否' && 乙方 === '否') {\n  recognizeStatus = '双方未盖章';\n} else if (甲方 === '否') {\n  recognizeStatus = '甲方未盖章';\n} else if (乙方 === '否') {\n  recognizeStatus = '乙方未盖章';\n} else if (双方 === '否') {\n  recognizeStatus = '双方未盖章';\n} else if (hasSign) {\n  if (isInvalidSignContract) recognizeStatus = '无效签字合同';\n  else if (isValidSignContract) recognizeStatus = '校验正确';\n  else recognizeStatus = '需人工复核';\n} else if (isValidSignContract) {\n  recognizeStatus = '校验正确';\n} else if (\n  missing.length > 0 ||\n  甲方 === '不确定' ||\n  乙方 === '不确定' ||\n  双方 === '不确定' ||\n  签字合同状态 === '不确定'\n) {\n  recognizeStatus = '需人工复核';\n}\n\nconst verifyInfo = lines.filter(Boolean).join('\\n');\n\nreturn {\n  json: {\n    ...d,\n    recognizeStatus,\n    合同识别状态: recognizeStatus,\n    校验信息: verifyInfo,\n    feishu_ready: true,\n    feishu_update_body: {\n      fields: {\n        合同识别状态: recognizeStatus,\n        校验信息: verifyInfo,\n      },\n    },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5440,
+        -64
+      ],
+      "id": "c3c1e2cb-d3e5-4f94-99db-85aedb40d3e8",
+      "name": "04 聚合输出"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ctx = $('01 检查执行记录').item.json;\nconst parser = $json || {};\nconst pages = Array.isArray(parser.pages) ? parser.pages : [];\nconst pageText = pages\n  .map((p) => `--- 第 ${p.page} 页 ---\\n${p.text || ''}`)\n  .join('\\n\\n');\n\nreturn {\n  json: {\n    record_id: ctx.record_id,\n    execNo: ctx.execNo,\n    pages,\n    pageText,\n    pdf_page_count: parser.page_count || 0,\n    pdf_selected_pages: parser.selected_pages || [],\n    pdf_stamp_pages: parser.stamp_pages || [],\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        -200
+      ],
+      "id": "24dfdc89-0a2a-4f3b-b30a-fdd2ce03b063",
+      "name": "准备合同文本"
+    },
+    {
+      "parameters": {
+        "model": "deepseek-v4-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        3360,
+        -40
+      ],
+      "id": "bc576a74-9ff0-4709-a0bd-df2735f5dba7",
+      "name": "DeepSeek Chat Model",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "PyhZGcLIC7RuJz4H",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const prep = $('准备合同文本').item.json;\nconst raw = $json.output ?? $json.text ?? $json.response ?? '';\n\nlet data = {};\ntry {\n  const cleaned = String(raw).replace(/```json/g, '').replace(/```/g, '').trim();\n  const start = cleaned.indexOf('{');\n  const end = cleaned.lastIndexOf('}');\n  if (start >= 0 && end > start) {\n    data = JSON.parse(cleaned.slice(start, end + 1));\n  }\n} catch (error) {\n  data = { 说明: `DeepSeek 输出解析失败：${error.message || error}` };\n}\n\nreturn {\n  json: {\n    record_id: prep.record_id,\n    execNo: prep.execNo,\n    stamp_pages: prep.pdf_stamp_pages || prep.stamp_pages || [],\n    活动名称: data['活动名称'] || data.活动名称 || '',\n    活动日期: data['活动日期'] || data.活动日期 || '',\n    活动人数: String(data['活动人数'] || data.活动人数 || ''),\n    活动总费用: String(data['活动总费用'] || data.活动总费用 || ''),\n    付款比例和方式: data['付款比例和方式'] || data.付款比例和方式 || '',\n    付款比例是否预警: data['付款比例是否预警'] || data.付款比例是否预警 || '',\n    字段识别说明: data['说明'] || data.说明 || '',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        -200
+      ],
+      "id": "09c9f776-008d-46fd-a757-9c2ebee434ef",
+      "name": "解析DeepSeek输出"
+    },
+    {
+      "parameters": {
+        "jsCode": "const MAX_IMAGE_BYTES = 10 * 1024 * 1024;\nconst MAX_BODY_BYTES = 64 * 1024 * 1024;\nconst MODEL = 'ep-20260702143654-vlssq';\n\nfunction b64DecodedBytes(b64) {\n  const s = String(b64 || '').replace(/\\s/g, '');\n  if (!s) return 0;\n  const padding = (s.match(/=*$/) || [''])[0].length;\n  return Math.floor((s.length * 3) / 4) - padding;\n}\n\nfunction utf8ByteLength(str) {\n  return Buffer.byteLength(String(str || ''), 'utf8');\n}\n\n// 与字段支路并行：只用执行记录 + 本节点输入（解析服务输出），避免等待准备合同文本\nconst ctx = $('01 检查执行记录').item.json;\nconst parser = $json || {};\nconst stampImages = (parser.stamp_images || [])\n  .filter((x) => x?.image_base64)\n  .map((x) => ({\n    page: x.page,\n    image_base64: String(x.image_base64).replace(/\\s/g, ''),\n  }))\n  .filter((x) => x.image_base64.length > 0);\n\nconst baseMeta = {\n  record_id: ctx.record_id,\n  execNo: ctx.execNo,\n  stamp_pages: parser.stamp_pages || [],\n};\n\nif (!stampImages.length) {\n  return [{\n    json: {\n      ...baseMeta,\n      has_stamp_image: false,\n      stamp_page: null,\n      image_base64: '',\n      skip_doubao: true,\n      stamp_size_error: false,\n      skip_doubao_reason: '未获取签章页图片',\n      doubao_request_body: null,\n    },\n  }];\n}\n\nconst ready = [];\nconst oversized = [];\n\nfor (const img of stampImages) {\n  const imageBytes = b64DecodedBytes(img.image_base64);\n  const bodyObj = {\n    model: MODEL,\n    input: [{\n      role: 'user',\n      content: [\n        {\n          type: 'input_image',\n          image_url: 'data:image/png;base64,' + img.image_base64,\n        },\n        {\n          type: 'input_text',\n          text: '这是合同第' + img.page + '页。只输出JSON：{\"甲方盖章\":\"是|否|不确定\",\"乙方盖章\":\"是|否|不确定\",\"甲方签字\":\"是|否|不确定\",\"甲方身份证复印件\":\"是|否|不确定\",\"说明\":\"\"}',\n        },\n      ],\n    }],\n  };\n  const bodyStr = JSON.stringify(bodyObj);\n  const bodyBytes = utf8ByteLength(bodyStr);\n\n  if (imageBytes > MAX_IMAGE_BYTES) {\n    oversized.push({\n      page: img.page,\n      reason: `签章图片超过10MB（第${img.page}页约${(imageBytes / 1024 / 1024).toFixed(1)}MB）`,\n      imageBytes,\n      bodyBytes,\n    });\n    continue;\n  }\n  if (bodyBytes > MAX_BODY_BYTES) {\n    oversized.push({\n      page: img.page,\n      reason: `豆包请求体超过64MB（第${img.page}页约${(bodyBytes / 1024 / 1024).toFixed(1)}MB），无法调用`,\n      imageBytes,\n      bodyBytes,\n    });\n    continue;\n  }\n\n  ready.push({\n    json: {\n      ...baseMeta,\n      has_stamp_image: true,\n      stamp_page: img.page,\n      image_base64: img.image_base64,\n      skip_doubao: false,\n      stamp_size_error: false,\n      doubao_request_body: bodyObj,\n      image_bytes: imageBytes,\n      body_bytes: bodyBytes,\n    },\n  });\n}\n\nif (!ready.length) {\n  const reason = oversized.map((x) => x.reason).join('；') || '签章图片无法满足豆包大小限制';\n  return [{\n    json: {\n      ...baseMeta,\n      has_stamp_image: true,\n      stamp_page: oversized[0]?.page ?? null,\n      image_base64: '',\n      skip_doubao: true,\n      stamp_size_error: true,\n      skip_doubao_reason: reason,\n      doubao_request_body: null,\n    },\n  }];\n}\n\nreturn ready;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        80
+      ],
+      "id": "12b3201c-ff59-402f-99ec-2cd0c54eb191",
+      "name": "准备签章图片"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('01 检查执行记录').item.json;\nconst prepItems = $('准备签章图片').all();\nconst doubaoItems = $input.all();\n\nconst base = {\n  record_id: ctx.record_id,\n  execNo: ctx.execNo,\n  stamp_pages: prepItems[0]?.json?.stamp_pages || [],\n};\n\nconst defaults = {\n  双方盖章: '不确定',\n  甲方盖章: '不确定',\n  乙方盖章: '不确定',\n  甲方签字: '不确定',\n  甲方身份证复印件: '不确定',\n  签字合同状态: '不适用',\n  盖章说明: '',\n  签章页识别明细: [],\n};\n\nfunction hasDoubaoResponse(item) {\n  const j = item?.json || {};\n  if (j.error || j.message?.includes?.('error')) return false;\n  return Array.isArray(j.output) || typeof j.output_text === 'string';\n}\n\nif (!doubaoItems.length || !doubaoItems.some(hasDoubaoResponse)) {\n  const skipReason = prepItems[0]?.json?.skip_doubao_reason || '豆包盖章识别失败或无结果';\n  return {\n    json: {\n      ...base,\n      ...defaults,\n      盖章说明: skipReason,\n      stamp_size_error: false,\n    },\n  };\n}\n\nfunction extractText(res) {\n  if (typeof res?.output_text === 'string' && res.output_text.trim()) {\n    return res.output_text.trim();\n  }\n  const chunks = [];\n  for (const item of res?.output || []) {\n    if (item?.type === 'message' && Array.isArray(item.content)) {\n      for (const part of item.content) {\n        if (typeof part?.text === 'string' && part.text.trim()) chunks.push(part.text.trim());\n      }\n    }\n    if (item?.type === 'reasoning' && Array.isArray(item.summary)) {\n      for (const part of item.summary) {\n        if (typeof part?.text === 'string' && part.text.trim()) chunks.push(part.text.trim());\n      }\n    }\n  }\n  return chunks.join('\\n');\n}\n\nfunction parseStampJson(raw) {\n  const cleaned = String(raw).replace(/```json/g, '').replace(/```/g, '').trim();\n  const start = cleaned.indexOf('{');\n  const end = cleaned.lastIndexOf('}');\n  if (start < 0 || end <= start) return null;\n  try {\n    return JSON.parse(cleaned.slice(start, end + 1));\n  } catch (_) {\n    return null;\n  }\n}\n\nfunction normalizeYesNo(value) {\n  const v = String(value || '').trim();\n  if (v === '是' || v === '否' || v === '不确定') return v;\n  return '不确定';\n}\n\nfunction evaluateSignContract(甲方签字, 甲方身份证复印件, 甲方盖章) {\n  if (甲方签字 === '是') {\n    if (甲方盖章 === '是' || 甲方身份证复印件 === '是') return '有效';\n    return '无效签字合同';\n  }\n  if (甲方签字 === '否') return '不适用';\n  return '不确定';\n}\n\nfunction derive双方(甲方, 乙方) {\n  if (甲方 === '是' && 乙方 === '是') return '是';\n  if (甲方 === '否' || 乙方 === '否') return '否';\n  return '不确定';\n}\n\nconst pageResults = [];\nfor (let i = 0; i < doubaoItems.length; i += 1) {\n  const prep = prepItems[i]?.json || {};\n  const rawText = extractText(doubaoItems[i].json);\n  let parsed = {\n    甲方盖章: '不确定',\n    乙方盖章: '不确定',\n    甲方签字: '不确定',\n    甲方身份证复印件: '不确定',\n    说明: '',\n  };\n  const jsonData = parseStampJson(rawText);\n  if (jsonData) {\n    parsed = {\n      甲方盖章: normalizeYesNo(jsonData['甲方盖章']),\n      乙方盖章: normalizeYesNo(jsonData['乙方盖章']),\n      甲方签字: normalizeYesNo(jsonData['甲方签字']),\n      甲方身份证复印件: normalizeYesNo(jsonData['甲方身份证复印件']),\n      说明: String(jsonData['说明'] || ''),\n    };\n  }\n  pageResults.push({\n    page: prep.stamp_page ?? base.stamp_pages[i] ?? i + 1,\n    ...parsed,\n  });\n}\n\nfunction aggregateField(pages, field) {\n  let hasYes = false;\n  let hasUncertain = false;\n  for (const page of pages) {\n    const val = normalizeYesNo(page[field]);\n    if (val === '是') hasYes = true;\n    else if (val === '不确定') hasUncertain = true;\n  }\n  if (hasYes) return '是';\n  if (hasUncertain) return '不确定';\n  return '否';\n}\n\nconst 甲方盖章 = aggregateField(pageResults, '甲方盖章');\nconst 乙方盖章 = aggregateField(pageResults, '乙方盖章');\nconst 双方盖章 = derive双方(甲方盖章, 乙方盖章);\nconst 甲方签字 = aggregateField(pageResults, '甲方签字');\nconst 甲方身份证复印件 = aggregateField(pageResults, '甲方身份证复印件');\nconst 签字合同状态 = evaluateSignContract(甲方签字, 甲方身份证复印件, 甲方盖章);\n\nreturn {\n  json: {\n    ...base,\n    双方盖章,\n    甲方盖章,\n    乙方盖章,\n    甲方签字,\n    甲方身份证复印件,\n    签字合同状态,\n    签章页识别明细: pageResults,\n    盖章说明: pageResults.map((r) => `第${r.page}页`).join('、') || '',\n    stamp_size_error: false,\n  },\n};\n",
+        "mode": "runOnceForAllItems"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        80
+      ],
+      "id": "d3ad1be3-721a-438e-aec4-9663cab02c10",
+      "name": "解析盖章结果"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.doubao_request_body }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        4288,
+        80
+      ],
+      "id": "8d482462-3507-42dc-988a-d98fa2ca7b9b",
+      "name": "豆包多模态_盖章识别",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "7wngbYpP2wGQYgkV",
+          "name": "Header Auth account"
+        }
+      },
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('01 检查执行记录').item.json.hasLinkedOrder }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "ec217c58-3dc6-4d3a-958d-6cc2dcc6e193"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "有关联订单"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('01 检查执行记录').item.json.hasLinkedOrder }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    },
+                    "id": "80eaf5a2-a031-49ac-b5f2-e988fd8b0ec3"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "无关联订单"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1056,
+        -16
+      ],
+      "id": "96804a0b-6695-437b-b9f9-9e3f0e9f8d91",
+      "name": "Switch执行记录"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function unwrapAttachmentField(field) {\n  if (Array.isArray(field)) return field;\n  if (field && Array.isArray(field.value)) return field.value;\n  return [];\n}\n\nfunction pickText(field) {\n  if (field == null) return '';\n  if (typeof field === 'string') return field.trim();\n  if (typeof field === 'number') return String(field);\n  if (Array.isArray(field)) return pickText(field[0]);\n  if (typeof field === 'object') {\n    if (Array.isArray(field.value) && field.value.length) {\n      const v = field.value[0];\n      if (typeof v === 'string') return v.trim();\n      if (v && typeof v.text === 'string') return v.text.trim();\n    }\n    if (typeof field.text === 'string') return field.text.trim();\n  }\n  return '';\n}\n\nfunction pickDate(field) {\n  if (field == null) return '';\n  if (typeof field === 'number') {\n    return new Date(field).toISOString().slice(0, 10);\n  }\n  if (typeof field === 'object' && Array.isArray(field.value) && field.value.length) {\n    const v = field.value[0];\n    if (typeof v === 'number') return new Date(v).toISOString().slice(0, 10);\n  }\n  return pickText(field);\n}\n\nfunction detectPdfStatus(item) {\n  if (!item || typeof item !== 'object') return 'unknown';\n  const name = String(item.name || item.text || item.title || '').trim().toLowerCase();\n  const type = String(item.type || item.mime_type || item.mimeType || '').trim().toLowerCase();\n  if (name.endsWith('.pdf')) return 'pdf';\n  if (type.includes('pdf') || type === 'application/pdf') return 'pdf';\n  const nonPdfExt = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.jpg', '.jpeg', '.png', '.zip', '.rar'];\n  if (nonPdfExt.some((ext) => name.endsWith(ext))) return 'non_pdf';\n  return 'unknown';\n}\n\nfunction pickContractAttachment(items) {\n  if (!items.length) return null;\n  const pdfs = items.filter((item) => detectPdfStatus(item) === 'pdf');\n  const list = pdfs.length ? pdfs : items;\n  return list[list.length - 1];\n}\n\n// PDF 大小不再在此硬拦；豆包前按单图 10MB / 请求体 64MB 校验\nconst ctx = $('01 检查执行记录').item.json;\nconst order = $('获取关联订单').item.json?.data?.records?.[0]?.fields || {};\nconst contractAttachments = unwrapAttachmentField(order['合同']);\nconst picked = pickContractAttachment(contractAttachments);\nconst pdfStatus = picked ? detectPdfStatus(picked) : 'none';\nconst contractFileName = picked\n  ? String(picked.name || picked.text || picked.title || '').trim()\n  : '';\nconst contractFileSize = Number(picked?.size || picked?.file_size || 0);\nconst contractFileSizeMB = contractFileSize > 0\n  ? Math.round((contractFileSize / 1024 / 1024) * 10) / 10\n  : 0;\n\nconst hasReference = contractAttachments.length > 0;\nconst isPdfContract = pdfStatus === 'pdf' || pdfStatus === 'unknown';\nconst hasOrderContract = hasReference && isPdfContract;\n\nlet noContractReason = ctx.noContractReason || '';\nif (!hasReference) {\n  noContractReason = '关联订单无合同附件';\n} else if (pdfStatus === 'non_pdf') {\n  noContractReason = `关联订单合同非PDF格式${contractFileName ? `：${contractFileName}` : ''}`;\n} else if (pdfStatus === 'none') {\n  noContractReason = '关联订单未找到合同附件';\n}\n\nreturn {\n  json: {\n    ...ctx,\n    hasOrderContract,\n    isPdfContract,\n    pdfStatus,\n    contractFileName,\n    contractFileSize,\n    contractFileSizeMB,\n    noContractReason,\n    订单合同价款: pickText(order['合同价款']),\n    订单执行人数: order['执行人数'] != null ? String(order['执行人数']) : ctx.执行人数,\n    订单执行日期: pickDate(order['执行日期']) || ctx.执行日期,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        -32
+      ],
+      "id": "88f7e03f-4dfd-44b4-8f7b-0bcb6c602073",
+      "name": "02 检查订单合同"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.hasOrderContract }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "602c8bb8-6fa7-4fbb-b8f2-7ccdb31063ef"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "常规"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.hasOrderContract }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    },
+                    "id": "0acfacab-fa3c-4065-8711-8a1c96aa9d9b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "无合同"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1856,
+        -48
+      ],
+      "id": "02e13c35-babc-408f-b72b-fc6e75969dce",
+      "name": "Switch订单合同"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "Bill-Re-identification",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        480,
+        -16
+      ],
+      "id": "3b416808-a5a8-44f8-b9e1-fd68835ef700",
+      "name": "Webhook",
+      "webhookId": "32916af2-cc1b-4134-a401-f801f50aa198"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $env.FEISHU_APP_ID }}\",\n  \"app_secret\": \"{{ $env.FEISHU_APP_SECRET }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        -16
+      ],
+      "id": "9e9b5c76-dc3a-49a8-b824-4cf05fdb750f",
+      "name": "获取飞书Token"
+    },
+    {
+      "parameters": {
+        "jsCode": "const DEST_OPTIONS = [\n  \"南京\",\n  \"安吉\",\n  \"千岛湖\",\n  \"德清\",\n  \"湖州市区\",\n  \"上海内\",\n  \"桐庐\",\n  \"舟山\",\n  \"临安\",\n  \"台州\",\n  \"嘉兴\",\n  \"杭州内\",\n  \"象山\",\n  \"宁波\",\n  \"无锡\",\n  \"苏州\",\n  \"溧阳\",\n  \"合肥\",\n  \"义乌\",\n  \"其他\"\n];\nconst DEST_ALIASES = [\n  {\n    \"alias\": \"湖州市区\",\n    \"target\": \"湖州市区\"\n  },\n  {\n    \"alias\": \"上海内\",\n    \"target\": \"上海内\"\n  },\n  {\n    \"alias\": \"杭州内\",\n    \"target\": \"杭州内\"\n  },\n  {\n    \"alias\": \"千岛湖\",\n    \"target\": \"千岛湖\"\n  },\n  {\n    \"alias\": \"杭州\",\n    \"target\": \"杭州内\"\n  },\n  {\n    \"alias\": \"上海\",\n    \"target\": \"上海内\"\n  },\n  {\n    \"alias\": \"湖州\",\n    \"target\": \"湖州市区\"\n  }\n];\n\nfunction matchDestinationsByKeyword(activityName) {\n  const text = String(activityName || '');\n  const hits = new Set();\n  const sorted = [...DEST_OPTIONS].sort((a, b) => b.length - a.length);\n  for (const opt of sorted) {\n    if (opt && text.includes(opt)) hits.add(opt);\n  }\n  for (const { alias, target } of DEST_ALIASES) {\n    if (text.includes(alias) && DEST_OPTIONS.includes(target)) hits.add(target);\n  }\n  hits.delete('其他');\n  return [...hits];\n}\n\nconst d = { ...$json };\nconst keywordHits = matchDestinationsByKeyword(d.活动名称);\nconst need_dest_llm = keywordHits.length === 0 && Boolean(String(d.活动名称 || '').trim());\n\nreturn {\n  json: {\n    ...d,\n    目的地: keywordHits,\n    dest_source: keywordHits.length ? 'keyword' : '',\n    need_dest_llm,\n    DEST_OPTIONS,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3760,
+        -200
+      ],
+      "id": "3b1d94f7-2596-4ab9-b4a1-6f21de4fee3b",
+      "name": "目的地关键词匹配"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.need_dest_llm }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "acaaeb32-5ef0-427d-862d-d500e9e41d27"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "需LLM"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        4000,
+        -200
+      ],
+      "id": "a5403b54-49e1-4cf9-998d-adfb3cce8d35",
+      "name": "Switch目的地"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ '活动名称：' + ($json.活动名称 || '') + '\\n请从下列目的地选项中选择匹配项（可多选），只返回 JSON：{\\\"目的地\\\":[]}。选项：' + ($json.DEST_OPTIONS || []).join('、') }}",
+        "options": {
+          "systemMessage": "你是目的地识别助手。只能从给定选项中选择，不要发明新地名。若无法判断返回 {\"目的地\":[]}。不要 markdown。"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        4240,
+        -320
+      ],
+      "id": "97e5536e-3ee1-48d1-9dc5-d294249f6f5a",
+      "name": "DeepSeek Agent_目的地兜底",
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const base = $('目的地关键词匹配').first().json;\nconst raw = $json.output ?? $json.text ?? $json.response ?? '';\nconst allowed = new Set(base.DEST_OPTIONS || []);\n\nlet picked = [];\ntry {\n  const cleaned = String(raw).replace(/```json/g, '').replace(/```/g, '').trim();\n  const start = cleaned.indexOf('{');\n  const end = cleaned.lastIndexOf('}');\n  if (start >= 0 && end > start) {\n    const data = JSON.parse(cleaned.slice(start, end + 1));\n    const arr = data['目的地'] || data.destinations || [];\n    if (Array.isArray(arr)) {\n      picked = arr.map((x) => String(x || '').trim()).filter((x) => allowed.has(x) && x !== '其他');\n    }\n  }\n} catch (e) {\n  picked = [];\n}\n\npicked = [...new Set(picked)];\n\nreturn {\n  json: {\n    ...base,\n    目的地: picked,\n    dest_source: picked.length ? 'deepseek' : '',\n    need_dest_llm: false,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        -320
+      ],
+      "id": "6c260a79-65da-4078-83e6-c163a92a3161",
+      "name": "合并目的地LLM结果"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $json;\n\nlet 预付款比例校验 = '失败';\nconst rawPayWarning = d.付款比例是否预警;\nif (rawPayWarning === true || rawPayWarning === '是' || String(rawPayWarning).toLowerCase() === 'true') {\n  预付款比例校验 = '预警';\n} else if (rawPayWarning === false || rawPayWarning === '否' || String(rawPayWarning).toLowerCase() === 'false') {\n  预付款比例校验 = '正常';\n}\n\nconst destinations = Array.isArray(d.目的地) ? d.目的地.filter(Boolean) : [];\nconst fields = { 预付款比例校验 };\nif (destinations.length) {\n  fields['目的地'] = destinations;\n}\n\nreturn {\n  json: {\n    branch: 'fields',\n    record_id: d.record_id,\n    execNo: d.execNo,\n    活动名称: d.活动名称 || '',\n    活动日期: d.活动日期 || '',\n    活动人数: d.活动人数 || '',\n    活动总费用: d.活动总费用 || '',\n    付款比例和方式: d.付款比例和方式 || '',\n    付款比例是否预警: d.付款比例是否预警,\n    字段识别说明: d.字段识别说明 || '',\n    目的地: destinations,\n    dest_source: d.dest_source || '',\n    预付款比例校验,\n    fields_ok: Boolean(d.活动名称 || d.活动日期 || d.活动人数 || d.活动总费用 || d.付款比例和方式),\n    feishu_update_body_a: { fields },\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        -200
+      ],
+      "id": "2ea9cc89-2615-4ded-8613-50848ab69f14",
+      "name": "组装回写A载荷"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $json.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.feishu_update_body_a) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4960,
+        -200
+      ],
+      "id": "a711ce43-e3eb-4d28-bd89-cdbeda8b57b4",
+      "name": "回写A_预付款与目的地",
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.skip_doubao }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "2b646078-b114-4e9b-aeb9-501b94d19bc9"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "跳过豆包"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        4048,
+        80
+      ],
+      "id": "2fac7cd5-5b04-4977-96db-7a8e6058d3dd",
+      "name": "Switch签章"
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://open.feishu.cn/open-apis/bitable/v1/apps/{{ $env.FEISHU_BASE_ID }}/tables/tbl821KbTBpjjyXI/records/{{ $json.record_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $node[\"获取飞书Token\"].json[\"tenant_access_token\"] }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { 合同识别状态: \"文件过大\", 校验信息: $json.skip_doubao_reason || \"签章图片或请求体超过豆包限制\" } }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4288,
+        200
+      ],
+      "id": "ca08d581-e2c0-4b82-9f65-730ad7dd28c7",
+      "name": "回写_签章超限",
+      "continueOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('准备签章图片').first().json;\nconst reason = prep.skip_doubao_reason || '未获取签章页图片';\nreturn {\n  json: {\n    branch: 'stamp',\n    record_id: prep.record_id,\n    execNo: prep.execNo,\n    双方盖章: '不确定',\n    甲方盖章: '不确定',\n    乙方盖章: '不确定',\n    甲方签字: '不确定',\n    甲方身份证复印件: '不确定',\n    签字合同状态: '不适用',\n    盖章说明: reason,\n    签章页识别明细: [],\n    stamp_size_error: Boolean(prep.stamp_size_error),\n    stamp_ok: false,\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        200
+      ],
+      "id": "2b38d952-eb3a-473a-910b-ec64d0a40f0e",
+      "name": "签章支路跳过结果"
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = { ...$json };\nreturn {\n  json: {\n    branch: 'stamp',\n    record_id: j.record_id,\n    execNo: j.execNo,\n    双方盖章: j.双方盖章 || '不确定',\n    甲方盖章: j.甲方盖章 || '不确定',\n    乙方盖章: j.乙方盖章 || '不确定',\n    甲方签字: j.甲方签字 || '不确定',\n    甲方身份证复印件: j.甲方身份证复印件 || '不确定',\n    签字合同状态: j.签字合同状态 || '不适用',\n    盖章说明: j.盖章说明 || '',\n    签章页识别明细: j.签章页识别明细 || [],\n    stamp_size_error: Boolean(j.stamp_size_error),\n    stamp_ok: !j.stamp_size_error && (j.双方盖章 === '是' || j.甲方盖章 === '是' || j.乙方盖章 === '是'),\n  },\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        80
+      ],
+      "id": "5683106b-37e1-4898-938f-de8d4808ec05",
+      "name": "签章支路结果"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        5200,
+        -64
+      ],
+      "id": "4b77e7af-ab21-48da-b64c-4cc13d4b3547",
+      "name": "Merge双支路"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.stamp_size_error }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "c42f8612-21f9-490f-9f55-9c70d8e19bcb"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "超限"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        4160,
+        200
+      ],
+      "id": "8ef98dec-c191-4dee-85f4-226d67d64779",
+      "name": "Switch超限"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "01 检查执行记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01 检查执行记录": {
+      "main": [
+        [
+          {
+            "node": "获取飞书Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取飞书Token": {
+      "main": [
+        [
+          {
+            "node": "Switch执行记录",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch执行记录": {
+      "main": [
+        [
+          {
+            "node": "获取关联订单",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "标记无合同",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取关联订单": {
+      "main": [
+        [
+          {
+            "node": "02 检查订单合同",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 检查订单合同": {
+      "main": [
+        [
+          {
+            "node": "Switch订单合同",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch订单合同": {
+      "main": [
+        [
+          {
+            "node": "标记识别中",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "标记无合同",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "标记识别中": {
+      "main": [
+        [
+          {
+            "node": "获取临时下载链接",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "获取临时下载链接": {
+      "main": [
+        [
+          {
+            "node": "下载PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "下载PDF": {
+      "main": [
+        [
+          {
+            "node": "调用合同解析服务",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "调用合同解析服务": {
+      "main": [
+        [
+          {
+            "node": "准备合同文本",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "准备签章图片",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备合同文本": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek Agent_合同字段识别",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "DeepSeek Agent_合同字段识别",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "DeepSeek Agent_目的地兜底",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Agent_合同字段识别": {
+      "main": [
+        [
+          {
+            "node": "解析DeepSeek输出",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析DeepSeek输出": {
+      "main": [
+        [
+          {
+            "node": "目的地关键词匹配",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "目的地关键词匹配": {
+      "main": [
+        [
+          {
+            "node": "Switch目的地",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch目的地": {
+      "main": [
+        [
+          {
+            "node": "DeepSeek Agent_目的地兜底",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "组装回写A载荷",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Agent_目的地兜底": {
+      "main": [
+        [
+          {
+            "node": "合并目的地LLM结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "合并目的地LLM结果": {
+      "main": [
+        [
+          {
+            "node": "组装回写A载荷",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "组装回写A载荷": {
+      "main": [
+        [
+          {
+            "node": "回写A_预付款与目的地",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "回写A_预付款与目的地": {
+      "main": [
+        [
+          {
+            "node": "Merge双支路",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "准备签章图片": {
+      "main": [
+        [
+          {
+            "node": "Switch签章",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch签章": {
+      "main": [
+        [
+          {
+            "node": "Switch超限",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "豆包多模态_盖章识别",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "回写_签章超限": {
+      "main": [
+        [
+          {
+            "node": "签章支路跳过结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "签章支路跳过结果": {
+      "main": [
+        [
+          {
+            "node": "Merge双支路",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "豆包多模态_盖章识别": {
+      "main": [
+        [
+          {
+            "node": "解析盖章结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析盖章结果": {
+      "main": [
+        [
+          {
+            "node": "签章支路结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "签章支路结果": {
+      "main": [
+        [
+          {
+            "node": "Merge双支路",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge双支路": {
+      "main": [
+        [
+          {
+            "node": "04 聚合输出",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 聚合输出": {
+      "main": [
+        [
+          {
+            "node": "回写B_状态与校验信息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch超限": {
+      "main": [
+        [
+          {
+            "node": "回写_签章超限",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "签章支路跳过结果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "builtBy": "scripts/contract_reid_upgrade_workflow.js",
+    "builtAt": "2026-08-03T07:22:14.841Z"
+  }
+}

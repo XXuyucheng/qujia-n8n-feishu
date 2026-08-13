@@ -277,6 +277,13 @@ tables:
         - id: optXeCCDQ6
           name: 需重试
           color: 3
+        # 与出团计划单对齐：可在 Bitable 增加「提交生成」后填入真实 opt id
+        # - id: optXXXX
+        #   name: 提交生成
+        #   color: 4
+    - id: fldFdgJS0a
+      type: 15
+      name: 在线报价
     - id: fldQU77Q76
       type: 15
       name: 出团通知书
@@ -458,6 +465,18 @@ tables:
     - id: fldsuKm8jW
       type: 1
       name: 客户需求
+    # 报价双模式：请替换为多维表格真实 field_id / opt id（与 n8n「判定生成方式」MODE_CONFIG 一致）
+    - id: FIELD_QUOTE_MODE_PLACEHOLDER
+      type: 3
+      name: 报价生成方式
+      property:
+        options:
+        - id: OPT_ATTACHMENT_PLACEHOLDER
+          name: 附件生成
+          color: 0
+        - id: OPT_ONDEMAND_PLACEHOLDER
+          name: 按需生成
+          color: 1
     - id: fld0Suh8bY
       type: 20
       name: 合计未收

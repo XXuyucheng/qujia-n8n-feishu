@@ -273,6 +273,52 @@ class FeishuClient:
             if i + batch_size < len(requests) and delay > 0:
                 time.sleep(delay)
 
+    def create_block_children(
+        self,
+        token: str,
+        document_id: str,
+        parent_block_id: str,
+        children: List[Dict[str, Any]],
+        *,
+        index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Create child blocks under a parent (docx create-children API).
+
+        Omit ``index`` to append at the end of the parent's children list.
+        Returns Feishu ``data`` (includes created ``children`` with sheet.token).
+        """
+        if not children:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/docx/v1/documents/{document_id}"
+            f"/blocks/{parent_block_id}/children"
+        )
+        body: Dict[str, Any] = {"children": children}
+        if index is not None:
+            body["index"] = index
+        params = {"document_revision_id": -1}
+        self._throttle("write")
+        resp = self._client.post(
+            url,
+            headers=self._headers(token),
+            params=params,
+            json=body,
+        )
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.post(
+                url,
+                headers=self._headers(token),
+                params=params,
+                json=body,
+            )
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="create_block_children")
+        return data.get("data") or {}
+
     def values_batch_update(
         self,
         token: str,
@@ -355,3 +401,190 @@ class FeishuClient:
             data = self._parse_json(resp)
         self._raise_for_code(data, action="delete_dimension_range")
         return data.get("data") or {}
+
+    def update_dimension_range(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        start_index: int,
+        end_index: int,
+        *,
+        major_dimension: str = "COLUMNS",
+        fixed_size: Optional[int] = None,
+        visible: Optional[bool] = None,
+    ) -> Dict[str, Any]:
+        """Update row/column properties (e.g. column width via fixedSize pixels)."""
+        if start_index < 1 or end_index < start_index:
+            return {}
+        props: Dict[str, Any] = {}
+        if fixed_size is not None:
+            props["fixedSize"] = int(fixed_size)
+        if visible is not None:
+            props["visible"] = bool(visible)
+        if not props:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/dimension_range"
+        )
+        body = {
+            "dimension": {
+                "sheetId": sheet_id,
+                "majorDimension": major_dimension,
+                "startIndex": start_index,
+                "endIndex": end_index,
+            },
+            "dimensionProperties": props,
+        }
+        self._throttle("write")
+        resp = self._client.put(url, headers=self._headers(token), json=body)
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.put(url, headers=self._headers(token), json=body)
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="update_dimension_range")
+        return data.get("data") or {}
+
+    def styles_batch_update(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        data_items: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Batch-set cell styles (alignment, font size, etc.)."""
+        if not data_items:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/styles_batch_update"
+        )
+        body = {"data": data_items}
+        self._throttle("write")
+        resp = self._client.put(url, headers=self._headers(token), json=body)
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.put(url, headers=self._headers(token), json=body)
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="styles_batch_update")
+        return data.get("data") or {}
+
+    def insert_dimension_range(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        start_index: int,
+        end_index: int,
+        *,
+        major_dimension: str = "ROWS",
+        inherit_style: str = "BEFORE",
+    ) -> Dict[str, Any]:
+        """Insert rows/columns. Inserts (end_index - start_index) units before start_index."""
+        if start_index < 1 or end_index <= start_index:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/insert_dimension_range"
+        )
+        body = {
+            "dimension": {
+                "sheetId": sheet_id,
+                "majorDimension": major_dimension,
+                "startIndex": start_index,
+                "endIndex": end_index,
+            },
+            "inheritStyle": inherit_style,
+        }
+        self._throttle("write")
+        resp = self._client.post(url, headers=self._headers(token), json=body)
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.post(url, headers=self._headers(token), json=body)
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="insert_dimension_range")
+        return data.get("data") or {}
+
+    def add_dimension_range(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        sheet_id: str,
+        length: int,
+        *,
+        major_dimension: str = "ROWS",
+    ) -> Dict[str, Any]:
+        """Append blank rows/columns at the end of a sheet (POST dimension_range)."""
+        length_i = int(length)
+        if length_i <= 0:
+            return {}
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/dimension_range"
+        )
+        body = {
+            "dimension": {
+                "sheetId": sheet_id,
+                "majorDimension": major_dimension,
+                "length": length_i,
+            }
+        }
+        self._throttle("write")
+        resp = self._client.post(url, headers=self._headers(token), json=body)
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.post(url, headers=self._headers(token), json=body)
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="add_dimension_range")
+        return data.get("data") or {}
+
+    def list_spreadsheet_sheets(
+        self,
+        token: str,
+        spreadsheet_token: str,
+    ) -> List[Dict[str, Any]]:
+        """List worksheets in a standalone spreadsheet (v3)."""
+        url = (
+            f"{FEISHU_BASE}/sheets/v3/spreadsheets/"
+            f"{spreadsheet_token}/sheets/query"
+        )
+        self._throttle("read")
+        resp = self._client.get(url, headers=self._headers(token))
+        data = self._parse_json(resp)
+        self._raise_for_code(data, action="list_spreadsheet_sheets")
+        sheets = (data.get("data") or {}).get("sheets") or []
+        return [s for s in sheets if isinstance(s, dict)]
+
+    def get_spreadsheet_values(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        range_a1: str,
+    ) -> List[List[Any]]:
+        """Read a values range (v2). range_a1 may be sheetId!A1:Z50."""
+        from urllib.parse import quote
+
+        encoded = quote(range_a1, safe="!")
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/values/{encoded}"
+        )
+        self._throttle("read")
+        resp = self._client.get(url, headers=self._headers(token))
+        data = self._parse_json(resp)
+        self._raise_for_code(data, action="get_spreadsheet_values")
+        value_range = (data.get("data") or {}).get("valueRange") or {}
+        values = value_range.get("values") or []
+        return values if isinstance(values, list) else []

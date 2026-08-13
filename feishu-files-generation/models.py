@@ -25,9 +25,13 @@ class GenerateRequest(BaseModel):
     document_name: Optional[str] = None
     fields: Optional[Dict[str, Any]] = None
     template_token: Optional[str] = None
+    # Raw Feishu folder token (highest priority for output location)
     folder_token: Optional[str] = None
+    # Named alias from config.yaml output_folders (e.g. "在线报价")
+    output_folder: Optional[str] = None
     placeholders: Optional[Dict[str, str]] = None
     sheet_rows: Optional[List[Dict[str, Any]]] = None
+    itinerary_rows: Optional[List[Dict[str, Any]]] = None
     options: GenerateOptions = Field(default_factory=GenerateOptions)
 
 
@@ -59,8 +63,12 @@ class GenerateResponse(BaseModel):
     document_url: Optional[str] = None
     document_name: Optional[str] = None
     template_token: Optional[str] = None
+    folder_token: Optional[str] = None
+    output_folder: Optional[str] = None
     replaced_blocks: int = 0
     sheet_rows_written: int = 0
+    itinerary_rows_written: int = 0
+    sheets_appended: int = 0
     unresolved_placeholders: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     placeholders: Optional[Dict[str, str]] = None
@@ -75,6 +83,7 @@ class PreviewResponse(BaseModel):
     document_name: Optional[str] = None
     template_token: Optional[str] = None
     folder_token: Optional[str] = None
+    output_folder: Optional[str] = None
     placeholders: Dict[str, str] = Field(default_factory=dict)
     missing_required: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
