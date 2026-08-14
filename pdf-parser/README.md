@@ -11,8 +11,10 @@ docker compose up -d pdf-parser
 
 健康检查：
 
-```text
-http://localhost:8000/health
+```bash
+curl -s http://localhost:8000/health
+# 期望 ocr.available=true；若为 false，说明镜像里没有 tesseract，需无缓存重建：
+# docker compose build --no-cache pdf-parser && docker compose up -d pdf-parser
 ```
 
 n8n 容器内调用地址：
@@ -20,6 +22,19 @@ n8n 容器内调用地址：
 ```text
 http://pdf-parser:8000
 ```
+
+### 常见问题：合同解析 500 / `TesseractNotFoundError`
+
+日志出现 `tesseract is not installed or it's not in your PATH` 时，容器镜像未装上系统包。请在服务器拉最新代码后：
+
+```bash
+docker compose build --no-cache pdf-parser
+docker compose up -d pdf-parser
+docker exec pdf-parser tesseract --version
+curl -s http://localhost:8000/health
+```
+
+即使 OCR 不可用，新版也会跳过 OCR 继续返回文本/签章图，不再因缺 tesseract 整请求 500。
 
 ## 技术栈
 
@@ -223,7 +238,7 @@ curl -X POST http://localhost:8000/parse-contract-invoice \
 | --- | --- |
 | `stamp_pages` | 签章页页码列表（倒数两页） |
 | `stamp_images[].page` | 页码 |
-| `stamp_images[].image_base64` | PNG 图片 Base64（2x 渲染），供多模态模型判断甲乙方盖章 |
+| `stamp_images[].image_base64` | 签章页图片 Base64（默认 JPEG，约 1.5x 渲染），供多模态模型判断甲乙方盖章 |
 
 ---
 

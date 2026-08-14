@@ -2,7 +2,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 import fitz
 import io
 import base64
+import logging
 import re
+import shutil
 from typing import List, Dict, Any, Set
 
 try:
@@ -12,7 +14,31 @@ except ImportError:  # pragma: no cover
     pytesseract = None
     Image = None
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [pdf-parser] %(message)s",
+)
+logger = logging.getLogger("pdf-parser")
+
 app = FastAPI(title="PDF Parser Service")
+
+# 签章页渲染：优先控制体积，避免大页 2x PNG 撑爆内存导致裸 500
+STAMP_RENDER_SCALES = (1.5, 1.0)
+STAMP_JPEG_QUALITY = 75
+STAMP_MAX_DECODED_BYTES = 10 * 1024 * 1024
+
+_TESSERACT_BIN = shutil.which("tesseract")
+TESSERACT_AVAILABLE = bool(pytesseract is not None and Image is not None and _TESSERACT_BIN)
+if not TESSERACT_AVAILABLE:
+    logger.warning(
+        "OCR disabled: tesseract binary missing or pytesseract/Pillow unavailable "
+        "(which=%s, pytesseract=%s, Pillow=%s). Text extraction will skip OCR.",
+        _TESSERACT_BIN,
+        pytesseract is not None,
+        Image is not None,
+    )
+else:
+    logger.info("OCR enabled: tesseract at %s", _TESSERACT_BIN)
 
 
 def normalize_date(value: str) -> str:
@@ -383,9 +409,47 @@ def select_stamp_pages(page_count: int) -> List[int]:
     return [page_count - 1, page_count]
 
 
-def render_page_image_base64(page, scale: float = 2.0) -> str:
+def render_page_image_base64(page, scale: float = 1.5) -> str:
+    """Render page to JPEG base64 (smaller than PNG), raise if still too large."""
     pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
-    return base64.b64encode(pix.tobytes("png")).decode("ascii")
+    try:
+        if Image is not None:
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG", quality=STAMP_JPEG_QUALITY, optimize=True)
+            raw = buf.getvalue()
+        else:
+            # PyMuPDF jpg fallback
+            raw = pix.tobytes("jpg")
+    finally:
+        pix = None
+    if len(raw) > STAMP_MAX_DECODED_BYTES:
+        raise ValueError(
+            f"stamp image too large after render: {len(raw)} bytes at scale={scale}"
+        )
+    return base64.b64encode(raw).decode("ascii")
+
+
+def render_stamp_image_safe(page, page_no: int) -> Dict[str, Any]:
+    last_error = ""
+    for scale in STAMP_RENDER_SCALES:
+        try:
+            return {
+                "page": page_no,
+                "image_base64": render_page_image_base64(page, scale=scale),
+                "format": "jpeg",
+                "scale": scale,
+            }
+        except Exception as exc:  # noqa: BLE001 — keep parsing alive
+            last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("stamp render failed page=%s scale=%s err=%s", page_no, scale, last_error)
+    return {
+        "page": page_no,
+        "image_base64": "",
+        "format": "jpeg",
+        "scale": None,
+        "error": last_error or "stamp render failed",
+    }
 
 
 def page_needs_ocr(text: str, min_chars: int = 40) -> bool:
@@ -394,14 +458,19 @@ def page_needs_ocr(text: str, min_chars: int = 40) -> bool:
 
 
 def ocr_page(page) -> str:
-    if pytesseract is None or Image is None:
+    # 缺二进制时绝不能抛 TesseractNotFoundError，否则整份合同解析 500
+    if not TESSERACT_AVAILABLE:
         return ""
 
-    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
-    image = Image.open(io.BytesIO(pix.tobytes("png")))
-    return clean_text(
-        pytesseract.image_to_string(image, lang="chi_sim+eng", config="--psm 6")
-    )
+    try:
+        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+        image = Image.open(io.BytesIO(pix.tobytes("png")))
+        return clean_text(
+            pytesseract.image_to_string(image, lang="chi_sim+eng", config="--psm 6")
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ocr_page failed: %s", exc)
+        return ""
 
 
 def extract_page_text(page) -> Dict[str, Any]:
@@ -414,7 +483,7 @@ def extract_page_text(page) -> Dict[str, Any]:
     )
 
     used_ocr = False
-    if page_needs_ocr(best_text):
+    if page_needs_ocr(best_text) and TESSERACT_AVAILABLE:
         ocr_text = ocr_page(page)
         if len(re.sub(r"\s+", "", ocr_text)) > len(re.sub(r"\s+", "", best_text)):
             best_engine = "ocr"
@@ -435,53 +504,75 @@ def parse_contract_pdf(data: bytes, filename: str = "", mode: str = "default") -
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Cannot open PDF: {exc}") from exc
 
-    page_count = len(doc)
-    if mode == "invoice":
-        selected_pages = select_invoice_contract_pages(page_count)
-        stamp_pages = select_stamp_pages(page_count)
-    else:
-        selected_pages = select_contract_pages(page_count)
-        stamp_pages = []
+    try:
+        page_count = len(doc)
+        if mode == "invoice":
+            selected_pages = select_invoice_contract_pages(page_count)
+            stamp_pages = select_stamp_pages(page_count)
+        else:
+            selected_pages = select_contract_pages(page_count)
+            stamp_pages = []
 
-    page_results: List[Dict[str, Any]] = []
+        page_results: List[Dict[str, Any]] = []
 
-    for page_no in selected_pages:
-        page = doc[page_no - 1]
-        page_info = extract_page_text(page)
-        page_results.append(
-            {
-                "page": page_no,
-                "text": page_info["text"],
-                "engine": page_info["engine"],
-                "used_ocr": page_info["used_ocr"],
-            }
-        )
-
-    stamp_images: List[Dict[str, Any]] = []
-    if mode == "invoice":
-        for page_no in stamp_pages:
-            stamp_images.append(
+        for page_no in selected_pages:
+            page = doc[page_no - 1]
+            page_info = extract_page_text(page)
+            page_results.append(
                 {
                     "page": page_no,
-                    "image_base64": render_page_image_base64(doc[page_no - 1]),
+                    "text": page_info["text"],
+                    "engine": page_info["engine"],
+                    "used_ocr": page_info["used_ocr"],
                 }
             )
 
-    return {
-        "success": True,
-        "filename": filename,
-        "mode": mode,
-        "page_count": page_count,
-        "selected_pages": selected_pages,
-        "stamp_pages": stamp_pages,
-        "pages": page_results,
-        "stamp_images": stamp_images,
-    }
+        stamp_images: List[Dict[str, Any]] = []
+        if mode == "invoice":
+            for page_no in stamp_pages:
+                stamp_images.append(render_stamp_image_safe(doc[page_no - 1], page_no))
+
+        return {
+            "success": True,
+            "filename": filename,
+            "mode": mode,
+            "page_count": page_count,
+            "selected_pages": selected_pages,
+            "stamp_pages": stamp_pages,
+            "pages": page_results,
+            "stamp_images": stamp_images,
+        }
+    finally:
+        try:
+            doc.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _read_pdf_upload(file: UploadFile) -> tuple[str, bytes]:
+    filename = file.filename or "upload.pdf"
+    # n8n 有时不带 .pdf 后缀，按内容仍尝试解析
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) < 5 or not data.startswith(b"%PDF"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not a PDF (filename={filename!r}, bytes={len(data)})",
+        )
+    return filename, data
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "pdf-parser"}
+    return {
+        "ok": True,
+        "service": "pdf-parser",
+        "ocr": {
+            "available": TESSERACT_AVAILABLE,
+            "tesseract_bin": _TESSERACT_BIN,
+        },
+    }
 
 
 @app.post("/parse")
@@ -549,27 +640,47 @@ async def parse_pdf(file: UploadFile = File(...)):
 
 @app.post("/parse-contract")
 async def parse_contract(file: UploadFile = File(...)):
-    filename = file.filename or ""
-
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-
-    return parse_contract_pdf(data, filename)
+    try:
+        filename, data = await _read_pdf_upload(file)
+        logger.info("parse-contract start filename=%s bytes=%s", filename, len(data))
+        result = parse_contract_pdf(data, filename)
+        logger.info(
+            "parse-contract ok pages=%s selected=%s",
+            result.get("page_count"),
+            result.get("selected_pages"),
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("parse-contract failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"parse-contract failed: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @app.post("/parse-contract-invoice")
 async def parse_contract_invoice(file: UploadFile = File(...)):
-    filename = file.filename or ""
-
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
-
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-
-    return parse_contract_pdf(data, filename, mode="invoice")
+    try:
+        filename, data = await _read_pdf_upload(file)
+        logger.info(
+            "parse-contract-invoice start filename=%s bytes=%s", filename, len(data)
+        )
+        result = parse_contract_pdf(data, filename, mode="invoice")
+        stamp_ok = sum(1 for s in result.get("stamp_images") or [] if s.get("image_base64"))
+        logger.info(
+            "parse-contract-invoice ok pages=%s stamps_ok=%s/%s",
+            result.get("page_count"),
+            stamp_ok,
+            len(result.get("stamp_images") or []),
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("parse-contract-invoice failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"parse-contract-invoice failed: {type(exc).__name__}: {exc}",
+        ) from exc

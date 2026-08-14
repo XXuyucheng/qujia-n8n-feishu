@@ -6,8 +6,10 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    -i https://pypi.tuna.tsinghua.edu.cn/simple
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com/debian-security|g' \
+      /etc/apt/sources.list.d/debian.sources 2>/dev/null || true \
+ && sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org|mirrors.aliyun.com/debian-security|g' \
+      /etc/apt/sources.list 2>/dev/null || true
 
 COPY app.py .
 

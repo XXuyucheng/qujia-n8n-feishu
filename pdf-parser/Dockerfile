@@ -10,7 +10,9 @@ RUN apt-get update \
        curl \
        tesseract-ocr \
        tesseract-ocr-chi-sim \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v tesseract \
+    && tesseract --version
 
 COPY requirements.txt .
 
