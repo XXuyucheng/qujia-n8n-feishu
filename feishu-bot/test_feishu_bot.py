@@ -1,8 +1,10 @@
 """feishu-bot 单元测试：配置加载、路由、抽取、校验、规则、对话与查重权限。"""
 
 import copy
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from config_loader import load_config, load_platform, skill_to_runtime
 from dialog import (
@@ -12,7 +14,8 @@ from dialog import (
     STATE_COLLECTING,
     STATE_CONFIRMING,
 )
-from extractor import extract_by_rules
+from extractor import extract_by_rules, extract_fields
+from query_proxy import call_query_agent, parse_agent_reply, resolve_webhook_url
 from router import match_trigger, resolve_skill_id
 from rules import apply_rules
 from validator import (
@@ -40,6 +43,16 @@ class ConfigSkillTests(unittest.TestCase):
         self.assertEqual(CONFIG["skill_id"], "supplier")
         self.assertTrue(CONFIG["table_id"])
         self.assertTrue(CONFIG["require_any_group"])
+        self.assertEqual(CONFIG.get("action") or "upsert_record", "upsert_record")
+        self.assertIsNot(CONFIG["ai"].get("extract_enabled"), False)
+        self.assertFalse(CONFIG["ai"].get("chat_enabled"))
+
+    def test_platform_loads_query_skill(self):
+        self.assertIn("query", SKILLS)
+        q = SKILLS["query"]
+        self.assertEqual(q["action"], "search")
+        self.assertEqual((q.get("target") or {}).get("type"), "n8n_agent")
+        self.assertFalse(q.get("fields"))
 
     def test_load_config_compat(self):
         cfg = load_config(CONFIG_DIR)
@@ -53,6 +66,11 @@ class RouterTests(unittest.TestCase):
         self.assertEqual(match_trigger("添加供应商：测试", SKILLS), "supplier")
         self.assertIsNone(match_trigger("你好", SKILLS))
 
+    def test_match_query_triggers(self):
+        self.assertEqual(match_trigger("查供应商 德清茶歇", SKILLS), "query")
+        self.assertEqual(match_trigger("查价差 团餐", SKILLS), "query")
+        self.assertEqual(match_trigger("/查 某某", SKILLS), "query")
+
     def test_sticky_session(self):
         session = {
             "state": STATE_COLLECTING,
@@ -60,6 +78,16 @@ class RouterTests(unittest.TestCase):
         }
         self.assertEqual(
             resolve_skill_id(text="补联系方式", session=session, skills=SKILLS),
+            "supplier",
+        )
+
+    def test_sticky_session_blocks_query_until_cancel(self):
+        session = {
+            "state": STATE_COLLECTING,
+            "payload": {"skill_id": "supplier", "data": {}},
+        }
+        self.assertEqual(
+            resolve_skill_id(text="查供应商 德清", session=session, skills=SKILLS),
             "supplier",
         )
 
@@ -172,6 +200,28 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(out["region"], "德清")
         self.assertEqual(problems, [])
 
+    def test_supplier_type_is_multi_select(self):
+        self.assertEqual(CONFIG["fields"]["supplier_type"]["type"], "multi_select")
+
+    def test_resolve_supplier_type_multi(self):
+        out, problems = resolve_select_fields(
+            CONFIG["fields"], {"supplier_type": "餐厅"}, CONFIG
+        )
+        self.assertEqual(out["supplier_type"], ["餐厅"])
+        self.assertEqual(problems, [])
+
+        out2, problems2 = resolve_select_fields(
+            CONFIG["fields"], {"supplier_type": "餐厅、民宿"}, CONFIG
+        )
+        self.assertEqual(out2["supplier_type"], ["餐厅", "民宿"])
+        self.assertEqual(problems2, [])
+
+        out3, problems3 = resolve_select_fields(
+            CONFIG["fields"], {"supplier_type": ["客户退款"]}, CONFIG
+        )
+        self.assertEqual(out3["supplier_type"], ["客户退款"])
+        self.assertEqual(problems3, [])
+
     def test_option_missing_hard(self):
         data = {"bank_name": "火星银行不存在"}
         out, problems = resolve_select_fields(CONFIG["fields"], data, CONFIG)
@@ -202,12 +252,14 @@ class ValidatorTests(unittest.TestCase):
             "supplier_name": "A",
             "bank_name": "中国工商银行",
             "settlement_type": ["月结"],
+            "supplier_type": ["餐厅", "民宿"],
             "qrcode": [{"file_token": "ftoken"}],
         }
         fields = build_bitable_fields(CONFIG["fields"], data)
         self.assertEqual(fields["供应商"], "A")
         self.assertEqual(fields["银行名称"], "中国工商银行")
         self.assertEqual(fields["结算类型"], ["月结"])
+        self.assertEqual(fields["类型"], ["餐厅", "民宿"])
         self.assertEqual(fields["支付宝/微信/二维码"], [{"file_token": "ftoken"}])
 
 
@@ -334,6 +386,7 @@ class DialogTests(unittest.TestCase):
         self.assertEqual(state, STATE_CONFIRMING)
         self.assertIn("确认", reply)
         self.assertEqual(payload["data"]["supplier_name"], "单元测试店")
+        self.assertEqual(payload["data"]["supplier_type"], ["餐厅"])
         self.assertEqual(payload.get("skill_id"), "supplier")
 
     def test_missing_payment(self):
@@ -356,7 +409,7 @@ class DialogTests(unittest.TestCase):
             session=None, text=text, message_type="text"
         )
         self.assertEqual(state, STATE_COLLECTING)
-        self.assertEqual(payload["data"]["supplier_type"], "客户退款")
+        self.assertEqual(payload["data"]["supplier_type"], ["客户退款"])
         self.assertIn("客户退款+订单号", reply)
 
     def test_account_invalid_in_dialog(self):
@@ -391,6 +444,31 @@ class DialogTests(unittest.TestCase):
         )
         self.assertIsNone(state)
         self.assertIn("已创建", reply)
+
+    def test_confirm_writes_supplier_type_as_list(self):
+        """旧会话里类型仍是字符串时，写表须包成多选数组。"""
+        feishu = FakeFeishu()
+        engine = DialogEngine(CONFIG, feishu)
+        session = {
+            "state": STATE_CONFIRMING,
+            "payload": {
+                "skill_id": "supplier",
+                "data": {
+                    "supplier_name": "类型多选店",
+                    "account_name": "王五",
+                    "account_no": "123",
+                    "bank_name": "中国工商银行",
+                    "supplier_type": "餐厅",
+                },
+                "skipped_suggested": True,
+            },
+        }
+        reply, state, payload = engine.handle(
+            session=session, text="确认", message_type="text"
+        )
+        self.assertIsNone(state)
+        self.assertIn("已创建", reply)
+        self.assertEqual(feishu.created["fields"]["类型"], ["餐厅"])
 
     def test_dedupe_ignores_account_name_only(self):
         """仅户名相同不查重；须撞供应商名或账号才触发。"""
@@ -587,6 +665,110 @@ class DialogTests(unittest.TestCase):
         self.assertIn("qrcode", payload["data"])
         self.assertNotIn("bank_name", payload["data"])
         self.assertNotIn("不存在", reply)
+
+
+class ExtractAiGuardTests(unittest.TestCase):
+    """录入 AI 只抽字段，可关闭 LLM。"""
+
+    def test_extract_disabled_skips_llm(self):
+        cfg = copy.deepcopy(CONFIG)
+        cfg["ai"] = {**(cfg.get("ai") or {}), "extract_enabled": False}
+        long_text = (
+            "添加供应商\n供应商：德清茶歇\n"
+            + ("补充说明若干字。" * 20)
+        )
+        with patch("extractor.extract_by_llm") as llm:
+            data = extract_fields(long_text, cfg, use_llm=True)
+        llm.assert_not_called()
+        self.assertEqual(data.get("supplier_name"), "德清茶歇")
+
+
+class QueryProxyTests(unittest.TestCase):
+    """只读查询：解析 n8n 回复、缺 URL、HTTP 失败；不写表。"""
+
+    def test_parse_agent_reply_shapes(self):
+        self.assertEqual(parse_agent_reply({"reply": "ok"}), "ok")
+        self.assertEqual(parse_agent_reply({"text": "hi"}), "hi")
+        self.assertEqual(parse_agent_reply({"output": "out"}), "out")
+        self.assertEqual(parse_agent_reply({"message": "msg"}), "msg")
+        self.assertEqual(parse_agent_reply({"json": {"reply": "nested"}}), "nested")
+        self.assertEqual(parse_agent_reply({"data": {"text": "d"}}), "d")
+        self.assertEqual(parse_agent_reply([{"reply": "list"}]), "list")
+        self.assertEqual(parse_agent_reply("plain"), "plain")
+
+    def test_resolve_webhook_url(self):
+        self.assertEqual(
+            resolve_webhook_url({"target": {"webhook_url": "http://n8n/x"}}),
+            "http://n8n/x",
+        )
+        with patch.dict(os.environ, {"N8N_QUERY_WEBHOOK_URL": "http://from-env"}):
+            self.assertEqual(resolve_webhook_url({"target": {}}), "http://from-env")
+
+    def test_missing_webhook_returns_unavailable(self):
+        skill = {"prompts": {"unavailable": "查询服务未配置。"}, "target": {}}
+        with patch.dict(os.environ, {"N8N_QUERY_WEBHOOK_URL": ""}, clear=False):
+            with patch("query_proxy.os.getenv", return_value=""):
+                reply = call_query_agent(skill, text="查供应商 A", resource={})
+        self.assertIn("未配置", reply)
+
+    def test_mocked_post_returns_reply(self):
+        captured = {}
+
+        class FakeResp:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"reply": "德清茶歇 月结"}
+
+            text = ""
+
+        class FakeClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, json=None):
+                captured["url"] = url
+                captured["json"] = json
+                return FakeResp()
+
+        skill = {
+            "id": "query",
+            "target": {"webhook_url": "http://n8n:5678/webhook/feishu-bot-query"},
+        }
+        with patch("query_proxy.httpx.Client", return_value=FakeClient()):
+            reply = call_query_agent(
+                skill,
+                text="查供应商 德清茶歇",
+                resource={"open_id": "ou_1", "chat_id": "oc_1", "message_id": "om_1"},
+            )
+        self.assertEqual(reply, "德清茶歇 月结")
+        self.assertEqual(captured["url"], "http://n8n:5678/webhook/feishu-bot-query")
+        self.assertEqual(captured["json"]["action"], "search")
+        self.assertEqual(captured["json"]["open_id"], "ou_1")
+        self.assertNotIn("fields", captured["json"])
+
+    def test_http_error_returns_timeout_prompt(self):
+        class BoomClient:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def post(self, url, json=None):
+                raise RuntimeError("n8n down")
+
+        skill = {
+            "target": {"webhook_url": "http://n8n/x"},
+            "prompts": {"timeout": "查询超时或 n8n 未响应，请稍后重试。"},
+        }
+        with patch("query_proxy.httpx.Client", return_value=BoomClient()):
+            reply = call_query_agent(skill, text="查价差", resource={})
+        self.assertIn("超时", reply)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,28 @@
+# Skill: 只读查询（转发 n8n AI Agent）
+# 不写多维表。知识库未就绪时，n8n 侧可暂用 bitable search。
+
+id: query
+name: 资源查询
+version: 1
+enabled: true
+action: search
+triggers:
+- 查供应商
+- 查询供应商
+- 供应商查询
+- 查价差
+- 价格差
+- 查资源
+- /查
+- /query
+target:
+  type: n8n_agent
+  # 可用环境变量覆盖；compose 默认 http://n8n:5678/webhook/feishu-bot-query
+  webhook_url: ${N8N_QUERY_WEBHOOK_URL}
+prompts:
+  unavailable: 查询服务未配置。请管理员设置 N8N_QUERY_WEBHOOK_URL，并在 n8n 导入 feishu-bot/n8n/query-agent.workflow.json。
+  timeout: 查询超时或 n8n 未响应，请稍后重试。录入请改发「添加供应商」。
+  empty: 没有查到可用结果。请补充供应商名称或资源关键词。
+  denied: 当前账号无权查看价格或完整供应商资料，请联系管理员。
+reply:
+  mode: text

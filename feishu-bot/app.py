@@ -1,6 +1,7 @@
 """feishu-bot HTTP 入口。
 
-职责：接收 listener 转发的 IM 消息 → 路由到 skill → 跑多轮 Form Engine → 回复飞书。
+职责：接收 listener 转发的 IM 消息 → 路由 skill。
+录入（upsert）走 Form Engine 写表；查询（search）只转发 n8n Agent，本进程不写表。
 写表 / 发消息均使用「对话专用应用」凭证（FEISHU_CHAT_APP_*），与 n8n 主应用隔离。
 """
 
@@ -23,6 +24,7 @@ from config_loader import (
 )
 from dialog import DialogEngine, should_handle_group
 from feishu_client import FeishuAPIError, FeishuClient
+from query_proxy import call_query_agent
 from router import resolve_skill_id
 from session_store import SessionStore
 
@@ -122,6 +124,7 @@ def list_skills() -> Dict[str, Any]:
             {
                 "id": s["id"],
                 "name": s.get("name"),
+                "action": s.get("action") or "upsert_record",
                 "triggers": s.get("triggers") or [],
                 "table_id": (s.get("target") or {}).get("table_id"),
             }
@@ -135,7 +138,8 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
     """主入口：feishu-listener 转发的 IM 事件。
 
     流程：幂等去重 → 过期会话 → 群聊 @ 过滤 → 解析 skill →
-    下载图片（如有）→ DialogEngine → 持久化会话 → 回复用户。
+    search 则转发 n8n（不下载图片、不入会话）→
+    否则下载图片（如有）→ DialogEngine → 持久化会话 → 回复用户。
     """
     event = body.get("event") or body
     resource = event.get("resource") or {}
@@ -204,6 +208,20 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
             return JSONResponse({"ok": True, "state": None, "skill_id": None})
 
         skill = skills[skill_id]
+        # 只读查询：转发 n8n Agent，不进入 Form Engine、不写表
+        if str(skill.get("action") or "") == "search":
+            reply = call_query_agent(skill, text=text, resource=resource)
+            _reply(feishu, resource, reply)
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "state": None,
+                    "skill_id": skill_id,
+                    "action": "search",
+                    "session_key": skey,
+                }
+            )
+
         runtime = skill_to_runtime(skill, app_cfg)
 
         image_bytes: Optional[bytes] = None

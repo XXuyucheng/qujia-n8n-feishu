@@ -8,14 +8,22 @@
 
 ## 架构
 
+录入留在本服务；查询转发 n8n Agent；多维表 → 知识库同步由 n8n 承担（不进对话进程）。详见 [ADR-001](../docs/adr/001-feishu-bot-vs-n8n-agent.md)。
+
 ```
 用户 → 对话应用 IM
          ↓
-feishu-listener（chat_ws 子进程）
+feishu-listener（chat_ws 子进程，长连接不并入 n8n）
          ↓ POST /api/message
 feishu-bot
-  router → skill runtime → Form Engine → 多维表格
+  ├─ skill supplier（录入）→ Form Engine → 多维表
+  └─ skill query（只读）→ n8n Agent webhook → 回复用户
+n8n（定时 / 表变更，非 /api/message）→ 趣加资源知识库
 ```
+
+n8n 导入模板：[n8n/README.md](n8n/README.md)。`.env` 中 `N8N_QUERY_WEBHOOK_URL` 默认 `http://n8n:5678/webhook/feishu-bot-query`。
+
+进行中的录入会话会粘住 skill：要查询请先发「取消」。
 
 ## 配置目录（改业务先改这里）
 
@@ -23,9 +31,13 @@ feishu-bot
 config/
   app.yaml                 # 全局：TTL、默认口令、idle 提示、路由策略、覆盖白名单
   skills/
-    supplier.yaml          # 供应商录入技能
+    supplier.yaml          # 供应商录入（写表）
+    query.yaml             # 只读查询（转发 n8n Agent）
   cards/                   # 预留（Phase 4）
   knowledge/               # 预留（Phase 5）
+n8n/
+  query-agent.workflow.json
+  kb-sync-bitable.workflow.json
 ```
 
 修改 YAML 后：
@@ -51,6 +63,7 @@ docker compose restart feishu-bot
 | 键 | 作用 |
 | --- | --- |
 | `id` / `name` / `enabled` | 技能标识；`enabled: false` 则不加载 |
+| `action` | 默认 `upsert_record`（写表）；`search` 只转发 n8n，不要求 `fields`/`table_id` |
 | `triggers` | 触发词（消息包含即命中） |
 | `prompts.*` | 对话文案（`{labels}` `{name}` `{action}` `{record_id}` `{detail}` `{label}` `{value}` 可替换） |
 | `commands` | cancel / confirm / skip / overwrite |
@@ -60,7 +73,9 @@ docker compose restart feishu-bot
 | `require_any_group` | 组合必填（任一组齐即可） |
 | `aliases` | 自然语言标签 → 逻辑键 |
 | `dedupe` | 多字段查重与冲突策略 `ask_overwrite` / `on_hit_denied: reject` |
+| `ai.extract_enabled` | 录入时是否调用 LLM 抽字段（默认 true）；校验与写表仍走 Form Engine |
 | `ai.extract_on_incomplete` | 缺必填或长文时调用 LLM 整理字段 |
+| `ai.chat_enabled` | 必须为 false：禁止把录入做成自由 Agent 对话 |
 | `attachment.field_key` | 消息图片写入哪个逻辑字段 |
 
 **边界行为摘要：** 账号须纯数字；选项不存在会硬提示并停留补全；查重仅比对**供应商名称**与**账号**（户名可重名）；命中时普通人拒绝、白名单可「覆盖」；含「客户退款」等关键词时类型自动设为客户退款，且名称须形如 `客户退款26071001`。
@@ -75,7 +90,7 @@ docker compose restart feishu-bot
 
 ```bash
 docker compose up -d --build feishu-bot feishu-listener
-curl http://localhost:8040/health    # service: feishu-bot, skills: ["supplier"]
+curl http://localhost:8040/health    # service: feishu-bot, skills 含 supplier / query
 curl http://localhost:8040/skills
 curl http://localhost:8010/health    # chat_ws_status=running
 ```
@@ -100,6 +115,8 @@ docker compose run --rm --no-deps feishu-bot python -m unittest test_feishu_bot.
 ```
 
 确认后写入；补全阶段可发收款码（独立图片或富文本插图）。
+
+查询示例：`查供应商 德清某某茶歇`、`查价差 团餐`。知识库未接入时 n8n 占位工作流会回说明文字，不会写表。
 
 ## 飞书应用清单
 

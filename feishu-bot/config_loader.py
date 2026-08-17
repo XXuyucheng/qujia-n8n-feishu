@@ -68,7 +68,11 @@ def load_app(config_dir: Path) -> Dict[str, Any]:
 
 
 def load_skills(config_dir: Path) -> Dict[str, Dict[str, Any]]:
-    """加载 skills/*.yaml；enabled:false 跳过；缺 fields/table_id 报错。"""
+    """加载 skills/*.yaml；enabled:false 跳过。
+
+    action=search：只读查询，不要求 fields/table_id。
+    默认（录入）：必须有 fields 与 target.table_id。
+    """
     skills_dir = config_dir / "skills"
     if not skills_dir.is_dir():
         raise ConfigError(f"skills directory not found: {skills_dir}")
@@ -79,9 +83,14 @@ def load_skills(config_dir: Path) -> Dict[str, Dict[str, Any]]:
         data["id"] = sid
         if data.get("enabled", True) is False:
             continue
+        action = str(data.get("action") or "upsert_record")
+        data["action"] = action
+        target = data.get("target") or {}
+        if action == "search":
+            skills[sid] = data
+            continue
         if not data.get("fields"):
             raise ConfigError(f"skill {sid} missing fields")
-        target = data.get("target") or {}
         if not target.get("table_id"):
             raise ConfigError(f"skill {sid} missing target.table_id")
         skills[sid] = data
@@ -131,8 +140,10 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
     runtime: Dict[str, Any] = {
         "skill_id": skill["id"],
         "skill_name": skill.get("name") or skill["id"],
+        "action": str(skill.get("action") or "upsert_record"),
         "base_id": base_id,
         "table_id": target.get("table_id"),
+        "webhook_url": target.get("webhook_url") or os.getenv("N8N_QUERY_WEBHOOK_URL", ""),
         "session_ttl_minutes": app.get("session_ttl_minutes", 30),
         "triggers": list(skill.get("triggers") or []),
         "cancel_words": commands["cancel"],
@@ -146,7 +157,10 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
         "prompts": skill.get("prompts") or {},
         "dedupe": skill.get("dedupe") or {},
         "rules": skill.get("rules") or [],
-        "ai": skill.get("ai") or app.get("ai") or {},
+        "ai": {
+            **(app.get("ai") or {}),
+            **(skill.get("ai") or {}),
+        },
         "permissions": {
             **(app.get("permissions") or {}),
             **(skill.get("permissions") or {}),

@@ -7,12 +7,14 @@ router:
   ambiguous_reply: |
     请选择要办理的业务，或发送对应指令：
     - 添加供应商 / /供应商
+    - 查供应商 / 查价差（只读查询，走 n8n Agent）
 
 ai:
   enabled: true
-  extract_enabled: true
-  chat_enabled: false
+  extract_enabled: true   # 录入：仅字段抽取，校验仍走 Form Engine
+  chat_enabled: false     # 禁止把录入做成自由 Agent 对话
   route_enabled: false
+  query_via_n8n: true     # 查询 skill 转发 n8n，不在本进程写表
 
 channels:
   reply_mode: text          # text | card（卡片远期）
@@ -33,4 +35,5 @@ permissions:
 
 idle_help: |
   发送「添加供应商」开始录入。也可发送 /供应商。
-  后续将支持更多业务技能。
+  查询（只读）：「查供应商 某某」或「查价差」。
+  录入由本机器人确认后写表；查询由 n8n Agent 检索，不直接改表。

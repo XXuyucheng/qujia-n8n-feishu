@@ -25,7 +25,8 @@ pdf-parser/           # PDF 解析服务
 feishu-listener/      # 飞书事件监听
 feishu-field-parser/  # 字段解析
 feishu-files-generation/
-feishu-bot/           # 对话机器人
+feishu-bot/           # 对话机器人（录入 Form Engine；查询转发 n8n）
+feishu-bot/n8n/       # 查询 Agent / 知识库同步工作流模板（导入 n8n，勿当录入引擎）
 ```
 
 工作流在 n8n 编辑器里维护（数据在 `n8n-data/`）；JSON 导出、设计稿等不入库。

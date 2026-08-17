@@ -136,6 +136,7 @@ services:
       - VISION_API_KEY=${VISION_API_KEY:-}
       - VISION_API_URL=${VISION_API_URL:-https://ark.cn-beijing.volces.com/api/v3/responses}
       - VISION_MODEL=${VISION_MODEL:-}
+      - N8N_QUERY_WEBHOOK_URL=${N8N_QUERY_WEBHOOK_URL:-http://n8n:5678/webhook/feishu-bot-query}
       - LOG_LEVEL=INFO
     restart: unless-stopped
 

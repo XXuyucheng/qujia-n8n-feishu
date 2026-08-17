@@ -125,8 +125,11 @@ def extract_by_llm(text: str, config: Dict[str, Any]) -> Dict[str, Any]:
         if cfg.get("type") != "attachment"
     ]
     prompt = (
-        "你是供应商信息抽取助手。从用户消息中提取字段，只返回 JSON 对象，"
-        "不要 markdown。未知字段省略。字段键："
+        "你是供应商信息抽取助手，只整理字段，不做问答、不决定是否写入。"
+        "只返回 JSON 对象，不要 markdown。"
+        "规则：只抽取用户明确写出的值；「无/没有/不填//」等空占位省略该键；"
+        "禁止编造账号、银行、户名；不确定的键不要输出。"
+        "字段键："
         + ", ".join(field_keys)
         + "。\n\n用户消息：\n"
         + text
@@ -244,10 +247,13 @@ def extract_fields(
     - 或原文较长（> long_text_chars，默认 40）
     """
     ruled = extract_by_rules(text, config)
-    if not use_llm:
-        return ruled
-
     ai_cfg = config.get("ai") or {}
+    # extract_enabled=false 或 chat 模式均不走 LLM；录入校验仍在 Form Engine
+    if not use_llm or ai_cfg.get("extract_enabled") is False:
+        return ruled
+    if ai_cfg.get("chat_enabled"):
+        logger.warning("ai.chat_enabled is ignored; entry stays Form Engine + extract only")
+
     extract_on_incomplete = bool(ai_cfg.get("extract_on_incomplete", True))
     long_chars = int(ai_cfg.get("long_text_chars") or 40)
 

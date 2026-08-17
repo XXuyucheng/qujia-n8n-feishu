@@ -1,0 +1,52 @@
+{
+  "name": "feishu-bot-query-agent",
+  "meta": {
+    "description": "只读查询 spike：feishu-bot action=search 转发至此。禁止 create/update 多维表。"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "feishu-bot-query",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-query",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "feishu-bot-query"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nconst text = String(body.text || body.event?.resource?.text || '').trim();\nconst openId = String(body.open_id || '');\n// Spike：知识库未就绪时返回说明。上线请在本节点前插入 AI Agent，\n// 工具仅允许 search（bitable/知识库 HTTP），禁止 create/update record。\nlet reply;\nif (!text) {\n  reply = '请说明要查的供应商或资源，例如：查供应商 德清某某茶歇';\n} else {\n  reply = [\n    '【查询占位，尚未接知识库】',\n    '问题：' + text,\n    '请在 n8n 中于 Webhook 与本节点之间加入 AI Agent + 只读检索工具。',\n    '录入请用「添加供应商」，不要在本工作流写表。'\n  ].join('\\n');\n}\nreturn [{ json: { reply, open_id: openId, action: 'search' } }];"
+      },
+      "id": "code-stub",
+      "name": "FormatReply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ reply: $json.reply }) }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [560, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "FormatReply", "type": "main", "index": 0 }]]
+    },
+    "FormatReply": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

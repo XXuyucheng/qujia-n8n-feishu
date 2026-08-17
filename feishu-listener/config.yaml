@@ -105,6 +105,17 @@ routes:
     n8n_webhook_url: http://feishu-bot:8040/api/message
     max_attempts: 2
     timeout_seconds: 25
+  # 供应商多维表 → 趣加资源知识库。走 n8n，禁止接到 feishu-bot /api/message。
+  # 知识库未就绪前保持停用；启用前先导入 feishu-bot/n8n/kb-sync-bitable.workflow.json
+  - name: kb-sync-bitable
+    enabled: false
+    dispatch_enabled: false
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl4vQ8kft1XXSLv
+    n8n_webhook_url: http://n8n:5678/webhook/kb-sync-bitable
+    max_attempts: 2
+    timeout_seconds: 60
   - name: make-plan #计划单生成
     enabled: true
     dispatch_enabled: true

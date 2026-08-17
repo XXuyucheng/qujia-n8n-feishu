@@ -1,0 +1,53 @@
+{
+  "name": "kb-sync-bitable",
+  "meta": {
+    "description": "多维表 → 趣加资源知识库同步（模板）。由定时或 listener 表变更触发，不要从 feishu-bot 对话进程调用。"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "id": "sched",
+      "name": "EveryHour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kb-sync-bitable",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "wh-sync",
+      "name": "TableChangeWebhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 220],
+      "webhookId": "kb-sync-bitable"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 模板：拉取飞书多维表变更（或使用 Webhook 入站 payload），\n// upsert 到趣加资源知识库。feishu-bot 只读该库，不负责同步、不写表。\nconst incoming = $input.first().json;\nreturn [{ json: { ok: true, note: 'replace with bitable fetch + KB upsert', source: 'bitable', incoming } }];"
+      },
+      "id": "sync-stub",
+      "name": "SyncStub",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 80]
+    }
+  ],
+  "connections": {
+    "EveryHour": {
+      "main": [[{ "node": "SyncStub", "type": "main", "index": 0 }]]
+    },
+    "TableChangeWebhook": {
+      "main": [[{ "node": "SyncStub", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

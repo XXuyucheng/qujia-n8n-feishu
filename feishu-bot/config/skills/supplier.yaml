@@ -181,7 +181,8 @@ fields:
   supplier_type:
     name: 类型
     field_id: fld2KNLPqA
-    type: single_select
+    # 飞书该列为多选；写表须传选项名数组
+    type: multi_select
     suggested: true
     options:
     - 酒店
@@ -261,6 +262,8 @@ dedupe:
   on_hit: ask_overwrite
   on_hit_denied: reject
 ai:
+  extract_enabled: true    # 仅抽取字段；不把写表/校验交给模型
+  chat_enabled: false
   extract_on_incomplete: true
   long_text_chars: 40
 attachment:
