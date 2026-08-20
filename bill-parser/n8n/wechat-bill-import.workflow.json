@@ -1,0 +1,101 @@
+{
+  "name": "wechat-bill-import",
+  "meta": {
+    "description": "上传微信个人账单 ZIP/CSV/XLSX → bill-parser 解析 → 按交易单号去重写入飞书多维表。不要接到 feishu-bot 对话进程。"
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wechat-bill-import",
+        "responseMode": "responseNode",
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "wh-wechat-bill",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "wechat-bill-import"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst json = item.json || {};\nconst nested = json.body && typeof json.body === 'object' ? json.body : json;\nconst password = String(json.password ?? nested.password ?? '');\nconst binary = item.binary || {};\nconst keys = Object.keys(binary);\nif (!keys.length) {\n  throw new Error('缺少账单文件。请用 multipart 字段 file 上传 ZIP/CSV/XLSX。');\n}\nconst srcKey = keys.includes('file') ? 'file' : (keys.includes('data') ? 'data' : keys[0]);\nreturn [{\n  json: { password, platform: 'wechat' },\n  binary: { data: binary[srcKey] },\n}];"
+      },
+      "id": "code-normalize",
+      "name": "NormalizeUpload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bill-parser:8050/parse",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            },
+            {
+              "name": "password",
+              "value": "={{ $json.password }}"
+            },
+            {
+              "name": "platform",
+              "value": "wechat"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-parse",
+      "name": "ParseBill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = $input.first().json || {};\nconst skipped = parsed.skipped || [];\nconst stats = parsed.stats || { income: 0, expense: 0, count: 0, skipped: skipped.length };\nconst transactions = parsed.transactions || [];\nconst batchId = String($execution.id || '');\n\nconst appId = $env.FEISHU_APP_ID;\nconst appSecret = $env.FEISHU_APP_SECRET;\nconst appToken = $env.FEISHU_WECHAT_BILL_BASE_ID || $env.FEISHU_BASE_ID;\nconst tableId = $env.FEISHU_WECHAT_BILL_TABLE_ID;\n\nif (!appId || !appSecret || !appToken || !tableId) {\n  throw new Error('缺少飞书环境变量：FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_WECHAT_BILL_BASE_ID / FEISHU_WECHAT_BILL_TABLE_ID');\n}\n\nconst summary = {\n  ok: true,\n  imported: 0,\n  duplicates: 0,\n  skipped: skipped.length,\n  stats,\n  created_record_ids: [],\n  duplicate_tx_ids: [],\n};\n\nif (!transactions.length) {\n  return [{ json: summary }];\n}\n\nconst helpers = this.helpers;\n\nfunction toMs(value) {\n  const text = String(value || '').trim();\n  if (!text) return null;\n  const d = new Date(text.replace(' ', 'T') + '+08:00');\n  const ms = d.getTime();\n  return Number.isNaN(ms) ? null : ms;\n}\n\nfunction fieldsOf(tx) {\n  const fields = {\n    '交易类型': tx.tx_type || '',\n    '交易对方': tx.peer || '',\n    '商品': tx.item || '',\n    '收支': tx.direction || '',\n    '金额': tx.amount,\n    '支付方式': tx.method || '',\n    '当前状态': tx.status || '',\n    '交易单号': tx.tx_id || '',\n    '商户单号': tx.merchant_order_id || '',\n    '备注': tx.note || '',\n    '分类': tx.category || '未分类',\n    '来源': '微信',\n    '导入批次': batchId,\n  };\n  const ms = toMs(tx.time);\n  if (ms != null) fields['交易时间'] = ms;\n  return fields;\n}\n\nasync function feishu(method, url, body) {\n  const resp = await helpers.httpRequest({\n    method,\n    url,\n    headers: {\n      Authorization: 'Bearer ' + token,\n      'Content-Type': 'application/json; charset=utf-8',\n    },\n    body,\n    json: true,\n  });\n  if (resp && typeof resp.code === 'number' && resp.code !== 0) {\n    throw new Error('飞书 API 失败 ' + resp.code + ': ' + (resp.msg || JSON.stringify(resp)));\n  }\n  return resp;\n}\n\nconst tokenResp = await helpers.httpRequest({\n  method: 'POST',\n  url: 'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal',\n  headers: { 'Content-Type': 'application/json; charset=utf-8' },\n  body: { app_id: appId, app_secret: appSecret },\n  json: true,\n});\nif (!tokenResp || !tokenResp.tenant_access_token) {\n  throw new Error('获取飞书 tenant_access_token 失败: ' + JSON.stringify(tokenResp));\n}\nconst token = tokenResp.tenant_access_token;\nconst searchUrl = 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + appToken + '/tables/' + tableId + '/records/search';\nconst createUrl = 'https://open.feishu.cn/open-apis/bitable/v1/apps/' + appToken + '/tables/' + tableId + '/records/batch_create';\n\nconst existing = new Set();\nconst txIds = transactions.map((t) => String(t.tx_id || '')).filter(Boolean);\n\nfor (let i = 0; i < txIds.length; i += 50) {\n  const chunk = txIds.slice(i, i + 50);\n  let pageToken = '';\n  do {\n    const body = {\n      field_names: ['交易单号'],\n      filter: {\n        conjunction: 'or',\n        conditions: chunk.map((id) => ({\n          field_name: '交易单号',\n          operator: 'is',\n          value: [id],\n        })),\n      },\n      page_size: 500,\n    };\n    if (pageToken) body.page_token = pageToken;\n    const found = await feishu('POST', searchUrl, body);\n    const items = (found.data && found.data.items) || [];\n    for (const rec of items) {\n      const value = rec.fields && rec.fields['交易单号'];\n      const id = Array.isArray(value) ? String(value[0] || '') : String(value || '');\n      if (id) existing.add(id);\n    }\n    pageToken = (found.data && found.data.page_token) || '';\n  } while (pageToken);\n}\n\nconst fresh = [];\nfor (const tx of transactions) {\n  const id = String(tx.tx_id || '');\n  if (id && existing.has(id)) {\n    summary.duplicates += 1;\n    summary.duplicate_tx_ids.push(id);\n    continue;\n  }\n  fresh.push(tx);\n}\n\nfor (let i = 0; i < fresh.length; i += 500) {\n  const chunk = fresh.slice(i, i + 500);\n  const created = await feishu('POST', createUrl, {\n    records: chunk.map((tx) => ({ fields: fieldsOf(tx) })),\n  });\n  const records = (created.data && created.data.records) || [];\n  for (const rec of records) {\n    if (rec.record_id) summary.created_record_ids.push(rec.record_id);\n  }\n  summary.imported += records.length || chunk.length;\n}\n\nreturn [{ json: summary }];"
+      },
+      "id": "code-import",
+      "name": "ImportToFeishu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [780, 0]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "respond",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1040, 0]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "NormalizeUpload", "type": "main", "index": 0 }]]
+    },
+    "NormalizeUpload": {
+      "main": [[{ "node": "ParseBill", "type": "main", "index": 0 }]]
+    },
+    "ParseBill": {
+      "main": [[{ "node": "ImportToFeishu", "type": "main", "index": 0 }]]
+    },
+    "ImportToFeishu": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
