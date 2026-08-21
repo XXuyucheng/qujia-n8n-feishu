@@ -27,8 +27,6 @@ services:
       - FEISHU_BASE_ID=${FEISHU_BASE_ID}
       - FEISHU_TABLE_ID=${FEISHU_TABLE_ID}
       - FEISHU_CHAT_ID=${FEISHU_CHAT_ID}
-      - FEISHU_WECHAT_BILL_BASE_ID=${FEISHU_WECHAT_BILL_BASE_ID:-}
-      - FEISHU_WECHAT_BILL_TABLE_ID=${FEISHU_WECHAT_BILL_TABLE_ID:-}
       - VISION_API_KEY=${VISION_API_KEY:-}
       - VISION_API_URL=${VISION_API_URL:-https://ark.cn-beijing.volces.com/api/v3/responses}
       - VISION_MODEL=${VISION_MODEL:-gpt-4o-mini}
@@ -42,23 +40,6 @@ services:
     container_name: pdf-parser
     ports:
       - "8000:8000"
-    restart: unless-stopped
-
-  bill-parser:
-    build:
-      context: ./bill-parser
-      args:
-        BASE_IMAGE: ${BILL_PARSER_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
-    container_name: bill-parser
-    ports:
-      - "8050:8050"
-    volumes:
-      - ./bill-parser/config.yaml:/app/config.yaml:ro
-    environment:
-      - TZ=Asia/Shanghai
-      - BILL_PARSER_CONFIG_PATH=/app/config.yaml
-      - BILL_PARSER_PORT=8050
-      - LOG_LEVEL=INFO
     restart: unless-stopped
 
   feishu-listener:
