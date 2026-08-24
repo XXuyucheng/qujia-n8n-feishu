@@ -85,6 +85,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       甲方联系人: "{联系人}"
       甲方电话: "{联系方式}"
       策划师: "{策划师}"
+      订单号: "{订单号}"
 
   趣伽团建:
     template_token: "P2nxdAGl2oOqpZxgpVQcyZOGnEg"
@@ -137,6 +138,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       甲方联系人: "{联系人}"
       甲方电话: "{联系方式}"
       策划师: "{策划师}"
+      订单号: "{订单号}"
 
   趣加文化创意:
     template_token: "PGLqd2qTto8SSKxu2IQcPDIBn8c"
@@ -189,6 +191,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       甲方联系人: "{联系人}"
       甲方电话: "{联系方式}"
       策划师: "{策划师}"
+      订单号: "{订单号}"
 
   出团计划单:
     template_token: "BEQndWqYsoXzaSxGrf3c4srLngg"
