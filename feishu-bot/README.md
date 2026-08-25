@@ -2,9 +2,9 @@
 
 飞书**对话专用应用**驱动的业务录入助手。当前已 **Skill 化**：供应商是第一个 skill，后续加客户/线索等只需新增 YAML。
 
-与 n8n 主应用隔离：只用 `FEISHU_CHAT_APP_*`。
+与 n8n 主应用隔离：只用 `FEISHU_CHAT_APP`。
 
-目录由原 `supplier-bot` 更名为 `feishu-bot`；技能 id 仍为 `supplier`。
+`feishu-bot`；技能 id 为 `supplier`。
 
 ## 架构
 
@@ -50,33 +50,34 @@ docker compose restart feishu-bot
 
 ### `app.yaml` 常用项
 
-| 键 | 作用 |
-| --- | --- |
-| `session_ttl_minutes` | 会话超时 |
-| `commands.*` | 全局默认口令（skill 可覆盖） |
-| `idle_help` | 未命中任何 skill 时的提示 |
-| `router.strategy` | 目前 `trigger_first` |
-| `permissions.overwrite_open_ids` | 可覆盖已有记录的飞书 `open_id` 白名单；空=无人可覆盖 |
+| 键                                 | 作用                                                  |
+| ---------------------------------- | ----------------------------------------------------- |
+| `session_ttl_minutes`            | 会话超时                                              |
+| `commands.*`                     | 全局默认口令（skill 可覆盖）                          |
+| `idle_help`                      | 未命中任何 skill 时的提示                             |
+| `router.strategy`                | 目前`trigger_first`                                 |
+| `channels.reply_mode`            | 录入默认`card`（互动卡片）；查询仍为文本            |
+| `permissions.overwrite_open_ids` | 可覆盖已有记录的飞书`open_id` 白名单；空=无人可覆盖 |
 
 ### `skills/*.yaml` 常用项
 
-| 键 | 作用 |
-| --- | --- |
-| `id` / `name` / `enabled` | 技能标识；`enabled: false` 则不加载 |
-| `action` | 默认 `upsert_record`（写表）；`search` 只转发 n8n，不要求 `fields`/`table_id` |
-| `triggers` | 触发词（消息包含即命中） |
-| `prompts.*` | 对话文案（`{labels}` `{name}` `{action}` `{record_id}` `{detail}` `{label}` `{value}` 可替换） |
-| `commands` | cancel / confirm / skip / overwrite |
-| `target.base_id` / `table_id` | 写入的多维表格 |
-| `fields` | 字段映射：`name` `type` `required` `suggested` `options`；可选 `pattern: digits` |
-| `rules` | 关键词规则：自动设字段、名称 pattern、提示文案 |
-| `require_any_group` | 组合必填（任一组齐即可） |
-| `aliases` | 自然语言标签 → 逻辑键 |
-| `dedupe` | 多字段查重与冲突策略 `ask_overwrite` / `on_hit_denied: reject` |
-| `ai.extract_enabled` | 录入时是否调用 LLM 抽字段（默认 true）；校验与写表仍走 Form Engine |
-| `ai.extract_on_incomplete` | 缺必填或长文时调用 LLM 整理字段 |
-| `ai.chat_enabled` | 必须为 false：禁止把录入做成自由 Agent 对话 |
-| `attachment.field_key` | 消息图片写入哪个逻辑字段 |
+| 键                                | 作用                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id` / `name` / `enabled`   | 技能标识；`enabled: false` 则不加载                                                                                  |
+| `action`                        | 默认`upsert_record`（写表）；`search` 只转发 n8n，不要求 `fields`/`table_id`                                   |
+| `triggers`                      | 触发词（消息包含即命中）                                                                                               |
+| `prompts.*`                     | 对话文案（`{labels}` `{name}` `{action}` `{record_id}` `{detail}` `{label}` `{value}` 可替换）           |
+| `commands`                      | cancel / confirm / skip / overwrite                                                                                    |
+| `target.base_id` / `table_id` | 写入的多维表格                                                                                                         |
+| `fields`                        | 字段映射：`name` `type` `required` `suggested` `options`；可选 `pattern: digits`、`required_unless_rule` |
+| `rules`                         | 关键词规则：自动设字段、名称 pattern、提示文案                                                                         |
+| `require_any_group`             | 组合必填（任一组齐即可）                                                                                               |
+| `aliases`                       | 自然语言标签 → 逻辑键                                                                                                 |
+| `dedupe`                        | 多字段查重与冲突策略`ask_overwrite` / `on_hit_denied: reject`                                                      |
+| `ai.extract_enabled`            | 录入时是否调用 LLM 抽字段（默认 true）；校验与写表仍走 Form Engine                                                     |
+| `ai.extract_on_incomplete`      | 缺必填或长文时调用 LLM 整理字段                                                                                        |
+| `ai.chat_enabled`               | 必须为 false：禁止把录入做成自由 Agent 对话                                                                            |
+| `attachment.field_key`          | 消息图片写入哪个逻辑字段                                                                                               |
 
 **边界行为摘要：** 账号须纯数字；选项不存在会硬提示并停留补全；查重仅比对**供应商名称**与**账号**（户名可重名）；命中时普通人拒绝、白名单可「覆盖」；含「客户退款」等关键词时类型自动设为客户退款，且名称须形如 `客户退款26071001`。
 
@@ -120,7 +121,16 @@ docker compose run --rm --no-deps feishu-bot python -m unittest test_feishu_bot.
 
 ## 飞书应用清单
 
-1. 开启机器人；长连接订阅 `im.message.receive_v1`
+1. 开启机器人。**事件配置**与**回调配置**分开设，都选 **使用长连接接收**（不要填公网 URL）：
+   - 事件：订阅 `im.message.receive_v1`
+   - 回调：只订阅新版 **卡片回传交互 `card.action.trigger`**
+   - 删除旧版 `card.action.trigger_v1`
+   - 机器人能力页若还有 **消息卡片请求网址**，清空后**发布应用版本**
+   - 否则飞书会再打一枪 HTTP，客户端仍报 **200671**（即使长连接已回 200）
 2. 权限：单聊读、发消息、下图、多维表编辑、media 上传
 3. 应用加入对应 Base 为可编辑协作者
 4. `.env`：`FEISHU_CHAT_APP_ID` / `FEISHU_CHAT_APP_SECRET`
+
+录入补全/确认使用 JSON 2.0 互动卡片（类型下拉、联系方式输入、确认/取消）。卡片点击由 `feishu-listener` 的 `chat_ws` 同步 `POST http://feishu-bot:8040/api/card-action`。
+
+客户退款识别词：`客户退款`、`退款客户`、`客户退定金`、`客户退订金`、`客户退回`、`退款给客户`（**不含**单独「客户」）。名称须含客户订单号，例如 `客户退款26071001`。非退款供应商必须填写联系方式和类型；类型不在选项内时回复会列出可选值。

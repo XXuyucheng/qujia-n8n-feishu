@@ -9,9 +9,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY app.py chat_ws.py .
+COPY app.py chat_ws.py card_callback.py .
 COPY config.yaml .
-COPY test_routes.py .
+COPY test_routes.py test_card_callback.py test_card_dispatch_patch.py .
 
 EXPOSE 8010
 

@@ -25,4 +25,4 @@ prompts:
   empty: 没有查到可用结果。请补充供应商名称或资源关键词。
   denied: 当前账号无权查看价格或完整供应商资料，请联系管理员。
 reply:
-  mode: text
+  mode: card

@@ -16,13 +16,25 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from card_actions import CardActionHandler, parse_lifecycle, send_lifecycle_card
+from cards import (
+    build_overwrite_card,
+    build_query_form_card,
+    build_result_card,
+    build_supplier_form_card,
+    build_welcome_card,
+)
 from config_loader import (
     ConfigError,
     load_platform,
     resolve_config_dir,
     skill_to_runtime,
 )
-from dialog import DialogEngine, should_handle_group
+from dialog import (
+    STATE_AWAIT_OVERWRITE,
+    DialogEngine,
+    should_handle_group,
+)
 from feishu_client import FeishuAPIError, FeishuClient
 from query_proxy import call_query_agent
 from router import resolve_skill_id
@@ -57,7 +69,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("feishu-bot")
 
-app = FastAPI(title="Feishu Bot (skill platform)", version="0.2.0")
+app = FastAPI(title="Feishu Bot (skill platform)", version="0.3.0")
 store = SessionStore(DB_PATH)
 
 
@@ -89,6 +101,49 @@ def _reply(feishu: FeishuClient, resource: Dict[str, Any], text: str) -> None:
             logger.warning("no message_id/chat_id to reply")
     except FeishuAPIError as exc:
         logger.error("reply failed: %s", exc.message)
+
+
+def _send_card(feishu: FeishuClient, resource: Dict[str, Any], card: Dict[str, Any]) -> None:
+    """发送互动卡片；失败时回退为标题文本。"""
+    message_id = str(resource.get("message_id") or "")
+    chat_id = str(resource.get("chat_id") or "")
+    open_id = str(resource.get("open_id") or "")
+    chat_type = str(resource.get("chat_type") or "")
+    try:
+        if message_id:
+            feishu.reply_interactive(message_id, card)
+            return
+        if chat_type != "group" and open_id:
+            feishu.send_interactive(open_id, card, receive_id_type="open_id")
+            return
+        if chat_id:
+            feishu.send_interactive(chat_id, card)
+            return
+        logger.warning("no target to send card")
+    except FeishuAPIError as exc:
+        logger.error("send card failed: %s", exc.message)
+        title = ((card.get("header") or {}).get("title") or {}).get("content") or "操作完成"
+        _reply(feishu, resource, str(title))
+
+
+def _strip_triggers(text: str, skill: Dict[str, Any]) -> str:
+    t = (text or "").strip()
+    for trig in sorted((skill.get("triggers") or []), key=len, reverse=True):
+        trig = str(trig)
+        if not trig:
+            continue
+        if t.startswith(trig):
+            return t[len(trig) :].lstrip("：: ，, ").strip()
+        if trig in t:
+            return t.replace(trig, "", 1).strip()
+    return t
+
+
+def _make_feishu() -> FeishuClient:
+    return FeishuClient()
+
+
+card_handler = CardActionHandler(store, _load, _make_feishu)
 
 
 @app.get("/health")
@@ -196,22 +251,42 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
     feishu = FeishuClient()
     try:
         if not skill_id:
-            # 未命中任何技能：返回 idle 帮助菜单
-            help_text = str(
-                app_cfg.get("idle_help")
-                or app_cfg.get("router", {}).get("ambiguous_reply")
-                or ""
+            # 未命中任何技能：欢迎卡片
+            _send_card(
+                feishu,
+                resource,
+                build_welcome_card(session_key=skey, open_id=str(resource.get("open_id") or "")),
             )
-            if not help_text:
-                help_text = "请发送业务指令，例如：添加供应商"
-            _reply(feishu, resource, help_text)
             return JSONResponse({"ok": True, "state": None, "skill_id": None})
 
         skill = skills[skill_id]
         # 只读查询：转发 n8n Agent，不进入 Form Engine、不写表
         if str(skill.get("action") or "") == "search":
+            rest = _strip_triggers(text, skill)
+            if not rest and not image_keys:
+                _send_card(
+                    feishu, resource, build_query_form_card(session_key=skey)
+                )
+                return JSONResponse(
+                    {
+                        "ok": True,
+                        "state": None,
+                        "skill_id": skill_id,
+                        "action": "search",
+                        "session_key": skey,
+                    }
+                )
             reply = call_query_agent(skill, text=text, resource=resource)
-            _reply(feishu, resource, reply)
+            _send_card(
+                feishu,
+                resource,
+                build_result_card(
+                    title="查询结果",
+                    body=reply,
+                    session_key=skey,
+                    ok=True,
+                ),
+            )
             return JSONResponse(
                 {
                     "ok": True,
@@ -265,7 +340,35 @@ def api_message(body: Dict[str, Any]) -> JSONResponse:
             store.clear(skey)
         else:
             store.save(skey, new_state, payload or {"skill_id": skill_id})
-        _reply(feishu, resource, reply)
+        data = (payload or {}).get("data") or {}
+        if new_state == STATE_AWAIT_OVERWRITE:
+            _send_card(
+                feishu,
+                resource,
+                build_overwrite_card(detail=reply, session_key=skey),
+            )
+        elif new_state in (None,):
+            cancelled = "取消" in (reply or "")
+            _send_card(
+                feishu,
+                resource,
+                build_welcome_card(session_key=skey)
+                if cancelled
+                else build_result_card(
+                    title="录入完成" if "成功" in reply or "已创建" in reply or "已更新" in reply else "提示",
+                    body=reply,
+                    session_key=skey,
+                    ok="失败" not in reply and "权限" not in reply,
+                ),
+            )
+        else:
+            _send_card(
+                feishu,
+                resource,
+                build_supplier_form_card(
+                    runtime, data, session_key=skey, hint=reply
+                ),
+            )
         return JSONResponse(
             {
                 "ok": True,
@@ -297,6 +400,42 @@ def preview_extract(body: Dict[str, Any]) -> Dict[str, Any]:
     )
     problems.extend(select_probs)
     return {"skill_id": runtime.get("skill_id"), "fields": data, "problems": problems}
+
+
+@app.post("/api/card-action")
+def api_card_action(body: Dict[str, Any]) -> JSONResponse:
+    """飞书 card.action.trigger：须在约 3s 内返回 toast+card，写表/查询异步。"""
+    try:
+        result = card_handler.handle(body if isinstance(body, dict) else {})
+    except Exception:
+        logger.exception("card-action failed")
+        result = {
+            "toast": {
+                "type": "error",
+                "content": "卡片处理失败，请改用文字或稍后重试。",
+            }
+        }
+    return JSONResponse(result)
+
+
+@app.post("/api/lifecycle")
+def api_lifecycle(body: Dict[str, Any]) -> JSONResponse:
+    """p2p 进入 / 机器人菜单：异步发欢迎卡或表单卡。"""
+    event = parse_lifecycle(body if isinstance(body, dict) else {})
+    if not event.kind:
+        return JSONResponse({"ok": True, "skipped": "unknown_lifecycle"})
+    feishu = FeishuClient()
+    try:
+        sent = send_lifecycle_card(feishu, event, _load, store)
+        return JSONResponse({"ok": True, "kind": event.kind, "sent": sent})
+    except FeishuAPIError as exc:
+        logger.error("lifecycle send failed: %s", exc.message)
+        return JSONResponse({"ok": False, "error": exc.message}, status_code=502)
+    except Exception:
+        logger.exception("lifecycle failed")
+        return JSONResponse({"ok": False, "error": "lifecycle_failed"}, status_code=500)
+    finally:
+        feishu.close()
 
 
 if __name__ == "__main__":

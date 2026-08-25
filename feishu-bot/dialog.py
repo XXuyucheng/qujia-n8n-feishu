@@ -155,6 +155,36 @@ def _normalize_data(
     return data, problems, active_rules
 
 
+def form_value_to_data(
+    config: Dict[str, Any], data: Dict[str, Any], form_value: Dict[str, Any]
+) -> Dict[str, Any]:
+    """把卡片 form_value 合并进草稿；保留收款码等未出现在表单里的字段。"""
+    from validator import is_blank_value
+
+    fields_cfg = config.get("fields") or {}
+    attach_key = _attachment_key(config)
+    incoming: Dict[str, Any] = {}
+    if isinstance(form_value, dict):
+        for key, val in form_value.items():
+            if key not in fields_cfg or key == attach_key:
+                continue
+            if is_blank_value(val):
+                continue
+            incoming[key] = val
+    return merge_fields(data, incoming)
+
+
+def validate_entry(
+    config: Dict[str, Any],
+    data: Dict[str, Any],
+    *,
+    text: str = "",
+    sticky_rules: Optional[List[str]] = None,
+) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    """本地校验（不含查重/写表），供卡片回调在 3s 内使用。"""
+    return _normalize_data(config, data, text, list(sticky_rules or []))
+
+
 def _record_supplier_name(record: Dict[str, Any]) -> str:
     """从查重返回的 record 中尽量取出「供应商」展示名。"""
     fields = record.get("fields") or {}

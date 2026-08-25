@@ -243,6 +243,58 @@ class FeishuClient:
         self._raise(data, "update record")
         return (data.get("data") or {}).get("record") or {}
 
+    def send_interactive(
+        self,
+        receive_id: str,
+        card: Dict[str, Any],
+        *,
+        receive_id_type: str = "chat_id",
+    ) -> str:
+        """主动发送 JSON 2.0 互动卡片，返回 message_id。"""
+        from cards import card_for_send
+
+        resp = self._client.post(
+            f"{FEISHU_BASE}/im/v1/messages",
+            headers=self._headers(),
+            params={"receive_id_type": receive_id_type},
+            json={
+                "receive_id": receive_id,
+                "msg_type": "interactive",
+                "content": json_dumps(card_for_send(card)),
+            },
+        )
+        data = resp.json()
+        self._raise(data, "send interactive")
+        return str(((data.get("data") or {}).get("message_id") or ""))
+
+    def reply_interactive(self, message_id: str, card: Dict[str, Any]) -> str:
+        """回复某条消息为互动卡片。"""
+        from cards import card_for_send
+
+        resp = self._client.post(
+            f"{FEISHU_BASE}/im/v1/messages/{message_id}/reply",
+            headers=self._headers(),
+            json={
+                "msg_type": "interactive",
+                "content": json_dumps(card_for_send(card)),
+            },
+        )
+        data = resp.json()
+        self._raise(data, "reply interactive")
+        return str(((data.get("data") or {}).get("message_id") or ""))
+
+    def patch_interactive(self, message_id: str, card: Dict[str, Any]) -> None:
+        """更新已发送的互动卡片（异步写表/查询完成后用）。"""
+        from cards import card_for_send
+
+        resp = self._client.patch(
+            f"{FEISHU_BASE}/im/v1/messages/{message_id}",
+            headers=self._headers(),
+            json={"content": json_dumps(card_for_send(card))},
+        )
+        data = resp.json()
+        self._raise(data, "patch interactive")
+
 
 def json_dumps(obj: Any) -> str:
     """飞书接口要求 content 等字段为 JSON 字符串。"""

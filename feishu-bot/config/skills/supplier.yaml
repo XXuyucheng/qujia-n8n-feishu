@@ -27,8 +27,8 @@ prompts:
     类型：餐厅
 
     结算类型：月结'
-  need_more_hint: 可继续补充文字，或直接发送收款码图片。回复「取消」结束。
-  confirm_hint: 请回复「确认」写入多维表格，或继续补充修改；「取消」放弃。
+  need_more_hint: 请在卡片表单中补全后点「提交」。也可继续发文字或收款码图片。回复「取消」结束。
+  confirm_hint: 请在卡片点「提交」写入多维表格，或回复「确认」；继续补充可改字段，「取消」放弃。
   suggest_hint: 建议补充：{labels}（可继续发送，或回复「跳过」进入确认）
   cancel: 已取消本次供应商录入。
   cancel_overwrite: 已取消，未覆盖已有记录。
@@ -269,4 +269,4 @@ ai:
 attachment:
   field_key: qrcode
 reply:
-  mode: text
+  mode: card

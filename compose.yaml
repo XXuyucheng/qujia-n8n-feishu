@@ -53,6 +53,10 @@ services:
     volumes:
       - ./feishu-listener/config.yaml:/app/config.yaml:ro
       - ./feishu-listener/data:/data
+      # 卡片回传 handler 与 bot 映射：改 py 后 restart 即可，不必先 rebuild
+      - ./feishu-listener/chat_ws.py:/app/chat_ws.py:ro
+      - ./feishu-listener/card_callback.py:/app/card_callback.py:ro
+      - ./.cursor:/cursor-debug
     environment:
       - TZ=Asia/Shanghai
       - FEISHU_APP_ID=${FEISHU_APP_ID}
@@ -68,6 +72,7 @@ services:
       - LISTENER_PORT=8010
       - LOG_LEVEL=INFO
       - ENABLE_DEBUG_ENDPOINTS=true
+      - FEISHU_BOT_CARD_ACTION_URL=http://feishu-bot:8040/api/card-action
     restart: unless-stopped
     depends_on:
       - feishu-bot
@@ -125,6 +130,7 @@ services:
       # 挂载源码，改 .py 后 restart 即可生效（依赖仍来自镜像）
       - ./feishu-bot:/app
       - ./feishu-bot/data:/data
+      - ./.cursor:/cursor-debug
     environment:
       - TZ=Asia/Shanghai
       - FEISHU_BOT_CONFIG_DIR=/app/config

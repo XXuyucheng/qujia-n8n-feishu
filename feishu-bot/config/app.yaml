@@ -17,7 +17,7 @@ ai:
   query_via_n8n: true     # 查询 skill 转发 n8n，不在本进程写表
 
 channels:
-  reply_mode: text          # text | card（卡片远期）
+  reply_mode: card          # 录入/查询默认互动卡片；校验与写表仍走 Form Engine
 
 # 全局默认口令（skill 未覆盖时使用）
 commands:
@@ -34,6 +34,8 @@ permissions:
   #   - ou_xxxxxxxx
 
 idle_help: |
-  发送「添加供应商」开始录入。也可发送 /供应商。
-  查询（只读）：「查供应商 某某」或「查价差」。
-  录入由本机器人确认后写表；查询由 n8n Agent 检索，不直接改表。
+  进入单聊会收到欢迎卡片。也可点菜单或发送：
+  - 添加供应商 / /供应商（录入表单卡片）
+  - 查供应商 某某 / 查价差（只读查询，走 n8n Agent）
+  录入在卡片提交后由本机器人写表；查询不改表。
+  收款码请在对话中发送图片（卡片无法上传附件）。

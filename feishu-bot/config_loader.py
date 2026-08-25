@@ -166,7 +166,8 @@ def skill_to_runtime(skill: Dict[str, Any], app: Dict[str, Any]) -> Dict[str, An
             **(skill.get("permissions") or {}),
         },
         "attachment_field": attach_key or "",
-        "reply": skill.get("reply") or {"mode": "text"},
+        "reply": skill.get("reply")
+        or {"mode": (app.get("channels") or {}).get("reply_mode") or "card"},
         "idle_help": app.get("idle_help") or "",
         "ambiguous_reply": (app.get("router") or {}).get("ambiguous_reply") or "",
     }

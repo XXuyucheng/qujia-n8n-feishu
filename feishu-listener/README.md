@@ -7,7 +7,11 @@
 | 应用 | 环境变量 | 事件 | 进程 |
 | --- | --- | --- | --- |
 | 主应用（n8n） | `FEISHU_APP_ID` / `SECRET` | bitable 变更；`im.message.receive_v1`（群内 n8n 机器人，如发票税务校验） | 主进程线程内 `lark.ws.Client` |
-| 对话应用（feishu-bot） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1` | 子进程 `chat_ws.py` → `POST /internal/ingest` |
+| 对话应用（feishu-bot） | `FEISHU_CHAT_APP_ID` / `SECRET` | `im.message.receive_v1`；**卡片回传 `card.action.trigger`** | 子进程 `chat_ws.py` → `POST /internal/ingest`（IM）；卡片点击同步 `POST http://feishu-bot:8040/api/card-action` |
+
+对话应用的 **回调配置** 必须只用长连接，且只订新版 `card.action.trigger`：删掉旧版 `card.action.trigger_v1`，并清空机器人页「消息卡片请求网址」后发布版本。旧版回调不支持长连接；失效 HTTP 地址会让客户端报 **200671**，即使 `chat_ws` 已回 WS 200。
+
+`lark-oapi` 1.6.x 会丢弃 `MessageType.CARD` 帧。`chat_ws.py` 会 patch 使其与 EVENT 一样分发；未注册事件（如打开单聊）回 `Response.code=200` 空包，避免 SDK 默认 500 被映射成 200671。
 
 同一进程无法跑两个 lark WS Client（asyncio 冲突），故对话应用使用子进程。健康检查字段：`ws_status`、`chat_ws_status`、`chat_ws_pid`。
 
