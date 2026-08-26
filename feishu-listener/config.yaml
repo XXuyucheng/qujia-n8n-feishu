@@ -40,14 +40,14 @@ routes:
     max_attempts: 2
     timeout_seconds: 180
   # 订单成交状态变更 → 写/清空成交日期（须在 online-quote 之后：同表先匹配先停）
-  # n8n 内比较 before/after，仅真正改了成交状态才回写（飞书 after_value 为全量快照）
+  # 含新建即为已成交；n8n 比较 before/after（新建 before 为空），仅状态变化才回写
   - name: order-deal-status-date
     enabled: true
     dispatch_enabled: true
     event_type: drive.file.bitable_record_changed_v1
     app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
     table_id: tbl91gZyDPCLhlva
-    actions: record_edited
+    actions: [record_added, record_edited]
     field_conditions:
       - field_id: fldel2QAvI
         exists: true
