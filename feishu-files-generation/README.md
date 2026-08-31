@@ -453,7 +453,7 @@ flowchart TD
 | [block_filler.py](block_filler.py) | 遍历 docx blocks，替换 `{{key}}`；probe 扫描；检测未替换占位符；警告跨 text_run |
 | [contract_sheet_filler.py](contract_sheet_filler.py) | **文末内嵌 Sheet**：合同费用/行程；出团 `settlement`（写值 + 小计/总价公式 + YAML 列宽/样式） |
 | [sheet_filler.py](sheet_filler.py) | **遗留**：填模板预埋 Sheet（出团已改文末追加；仍可供其它路径复用公式拼装） |
-| [spreadsheet_filler.py](spreadsheet_filler.py) | **独立 Spreadsheet**：单元格 `{{}}` 扫描替换；插行规格；明细五列；行合计 F；活动总价行 D/H/I（含税费行排除）；行程 A/B/C 插行 |
+| [spreadsheet_filler.py](spreadsheet_filler.py) | **独立 Spreadsheet**：单元格 `{{}}` 扫描替换；插行规格；明细五列；行合计 F；活动总价行 D/H/I（含税费行排除）；最终总价 D 默认 `=D{活动总价行}`；行程 A/B/C 插行 |
 | [models.py](models.py) | `GenerateRequest` / `GenerateResponse` / Probe / Preview 等 Pydantic 模型 |
 | [config.yaml](config.yaml) | 各模板的 `template_token`、`folder_token`、占位符映射、`sheet` 列与公式、`signing_unit_map` |
 | [ONLINE_QUOTE_TEMPLATE.md](ONLINE_QUOTE_TEMPLATE.md) | 在线报价模板：占位符、第 9/10 行锚点、公式约定 |

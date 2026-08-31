@@ -269,7 +269,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
           col: E
         - field: 数量
           col: G
-      # inheritStyle 不继承公式；插行后由服务写入行公式与活动总价行公式
+      # inheritStyle 不继承公式；插行后由服务写入行公式与活动总价/最终总价行公式
       formula:
         line_total_col: F
         line_total: '=IF(OR(D{row}="",E{row}=""),"",D{row}*E{row})'
@@ -282,9 +282,14 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
         total_diff_col: I
         profit_sum: "=SUM(I{start}:I{end})"
         total_diff: "=D{row}-H{row}"
-      # 原始模板第 15 行上方插行程；运行时按报价净增行数偏移
+        # 模板 A 列「最终总价」行：D 默认引用活动总价 D，策划可手改抹零
+        final_total_label: 最终总价
+        final_total_col: D
+        final_total: "=D{total_row}"
+      # 原始模板第 16 行上方插行程；运行时按报价净增行数偏移
+      # （活动总价下若已加「最终总价」行，insert_before_row 需相对旧版 +1）
       itinerary:
-        insert_before_row: 15
+        insert_before_row: 16
         max_rows: 80
         columns:
           - field: 日期

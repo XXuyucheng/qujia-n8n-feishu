@@ -48,6 +48,7 @@ from spreadsheet_filler import (
     anchor_rows_to_delete,
     build_activity_total_formula_ranges,
     build_detail_formula_ranges,
+    build_final_total_formula_ranges,
     build_itinerary_value_ranges,
     build_online_quote_detail_ranges,
     build_placeholder_value_ranges,
@@ -374,9 +375,13 @@ def _generate_spreadsheet(
         tax_label = str(
             (formula_cfg or {}).get("tax_label") or "税费及服务"
         ).strip()
+        final_total_label = str(
+            (formula_cfg or {}).get("final_total_label") or ""
+        ).strip()
         total_row = None
         tax_row = None
-        if total_label or tax_label:
+        final_row = None
+        if total_label or tax_label or final_total_label:
             post_grid = client.get_spreadsheet_values(
                 token,
                 spreadsheet_token,
@@ -386,6 +391,10 @@ def _generate_spreadsheet(
                 total_row = find_total_label_row(post_grid, total_label, col_index=0)
             if tax_label:
                 tax_row = find_total_label_row(post_grid, tax_label, col_index=0)
+            if final_total_label:
+                final_row = find_total_label_row(
+                    post_grid, final_total_label, col_index=0
+                )
 
         formula_ranges = build_detail_formula_ranges(
             sheet_id,
@@ -402,6 +411,14 @@ def _generate_spreadsheet(
                 tax_row=tax_row,
             )
         )
+        formula_ranges.extend(
+            build_final_total_formula_ranges(
+                sheet_id,
+                formula_sheet,
+                total_row=total_row,
+                final_row=final_row,
+            )
+        )
         if formula_ranges:
             client.values_batch_update(token, spreadsheet_token, formula_ranges)
         if total_row is None:
@@ -411,6 +428,14 @@ def _generate_spreadsheet(
         elif tax_row is None:
             warnings.append(
                 f"未在 A 列找到「{tax_label}」，活动总价 D 列仅写入 SUM(F)（未乘税费）"
+            )
+        if final_total_label and final_row is None:
+            warnings.append(
+                f"未在 A 列找到「{final_total_label}」，已跳过最终总价默认公式写入"
+            )
+        elif final_total_label and total_row is None:
+            warnings.append(
+                f"已找到「{final_total_label}」但缺少活动总价行，已跳过最终总价默认公式"
             )
 
     itinerary_rows_written = 0

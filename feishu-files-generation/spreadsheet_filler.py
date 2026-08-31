@@ -341,6 +341,41 @@ def build_activity_total_formula_ranges(
     ]
 
 
+def build_final_total_formula_ranges(
+    sheet_id: str,
+    sheet_cfg: Dict[str, Any],
+    *,
+    total_row: Optional[int] = None,
+    final_row: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Write 最终总价 D defaulting to 活动总价 D (e.g. =D{total_row}).
+
+    Planner may overwrite the cell with a rounded/discounted amount.
+    """
+    if not sheet_id or total_row is None or final_row is None:
+        return []
+
+    formula_cfg = sheet_cfg.get("formula")
+    if not isinstance(formula_cfg, dict) or not formula_cfg:
+        return []
+
+    final_col = str(formula_cfg.get("final_total_col") or "D").strip().upper()
+    tpl = str(formula_cfg.get("final_total") or "").strip()
+    if not final_col or not tpl:
+        return []
+
+    text = tpl.format(total_row=total_row, row=final_row)
+    if not text.startswith("="):
+        text = "=" + text
+
+    return [
+        {
+            "range": f"{sheet_id}!{final_col}{final_row}:{final_col}{final_row}",
+            "values": [[_formula_cell(text)]],
+        }
+    ]
+
+
 # Back-compat alias used by older tests / imports
 def build_total_sum_range(
     sheet_id: str,

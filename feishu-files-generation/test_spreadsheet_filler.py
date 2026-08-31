@@ -7,6 +7,7 @@ import unittest
 from spreadsheet_filler import (
     anchor_rows_to_delete,
     build_detail_formula_ranges,
+    build_final_total_formula_ranges,
     build_itinerary_value_ranges,
     build_online_quote_detail_ranges,
     detail_start_row,
@@ -133,6 +134,44 @@ class DetailGCopiesDTests(unittest.TestCase):
         g_vals = [row[0] for row in by_range["sht1!G10:G11"]]
         self.assertEqual(d_vals, [30, 15])
         self.assertEqual(g_vals, d_vals)
+
+
+class FinalTotalFormulaRangesTests(unittest.TestCase):
+    def test_writes_d_equals_activity_total_d(self):
+        sheet = {
+            "insert_after_row": 9,
+            "insert_before_row": 10,
+            "formula": {
+                "final_total_col": "D",
+                "final_total": "=D{total_row}",
+            },
+        }
+        ranges = build_final_total_formula_ranges(
+            "sht1", sheet, total_row=20, final_row=21
+        )
+        self.assertEqual(len(ranges), 1)
+        self.assertEqual(ranges[0]["range"], "sht1!D21:D21")
+        cell = ranges[0]["values"][0][0]
+        self.assertEqual(cell["type"], "formula")
+        self.assertEqual(cell["text"], "=D20")
+
+    def test_skips_without_rows_or_config(self):
+        sheet = {
+            "formula": {
+                "final_total_col": "D",
+                "final_total": "=D{total_row}",
+            },
+        }
+        self.assertEqual(
+            build_final_total_formula_ranges(
+                "sht1", sheet, total_row=None, final_row=21
+            ),
+            [],
+        )
+        self.assertEqual(
+            build_final_total_formula_ranges("sht1", {}, total_row=20, final_row=21),
+            [],
+        )
 
 
 class ItineraryInsertTests(unittest.TestCase):
