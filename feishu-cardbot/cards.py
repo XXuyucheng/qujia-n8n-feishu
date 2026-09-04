@@ -4,6 +4,53 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
+# region agent log
+def _agent_log(hypothesis_id: str, location: str, message: str, data: Any = None) -> None:
+    import json
+    import time
+    import urllib.request
+
+    payload = {
+        "sessionId": "e9b13d",
+        "runId": "post-fix",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data if data is not None else {},
+        "timestamp": int(time.time() * 1000),
+    }
+    line = json.dumps(payload, ensure_ascii=False) + "\n"
+    for path in (
+        "/Users/xuyucheng/My_project/n8n/.cursor/debug-e9b13d.log",
+        "/app/.cursor-debug-e9b13d.log",
+    ):
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    for url in (
+        "http://host.docker.internal:7828/ingest/ef15f0ab-2bbe-49ed-97a7-590afdf8b03d",
+        "http://127.0.0.1:7828/ingest/ef15f0ab-2bbe-49ed-97a7-590afdf8b03d",
+    ):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Debug-Session-Id": "e9b13d",
+                },
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=0.5)
+        except Exception:
+            pass
+
+
+# endregion
+
 
 def _plain(text: str) -> Dict[str, str]:
     return {"tag": "plain_text", "content": str(text or "")}
@@ -96,8 +143,6 @@ def _input_element(key: str, cfg: Dict[str, Any], data: Dict[str, Any]) -> Dict[
         "tag": "input",
         "name": key,
         "placeholder": _plain(f"请输入{cfg.get('name') or key}"),
-        "label": _plain(str(cfg.get("name") or key)),
-        "label_position": "top",
         "width": "fill",
         "required": bool(cfg.get("required")),
     }
@@ -116,8 +161,6 @@ def _select_element(key: str, cfg: Dict[str, Any], data: Dict[str, Any]) -> Dict
             "tag": "multi_select_static",
             "name": key,
             "placeholder": _plain(f"请选择{label}"),
-            "label": _plain(label),
-            "label_position": "top",
             "width": "fill",
             "options": options,
         }
@@ -131,8 +174,6 @@ def _select_element(key: str, cfg: Dict[str, Any], data: Dict[str, Any]) -> Dict
         "tag": "select_static",
         "name": key,
         "placeholder": _plain(f"请选择{label}"),
-        "label": _plain(label),
-        "label_position": "top",
         "width": "fill",
         "options": options,
     }
@@ -205,10 +246,26 @@ def build_supplier_form(
     for key in form_field_keys(fields_cfg):
         cfg = fields_cfg.get(key) or {}
         ftype = str(cfg.get("type") or "text")
+        caption = str(cfg.get("name") or key)
+        form_elements.append(_md(f"**{caption}**"))
         if ftype in {"single_select", "multi_select"}:
             form_elements.append(_select_element(key, cfg, data))
         else:
             form_elements.append(_input_element(key, cfg, data))
+    # region agent log
+    select_keys = [
+        {k: el.get(k) for k in ("tag", "name") if k in el}
+        | {"has_label": "label" in el}
+        for el in form_elements
+        if el.get("tag") in {"select_static", "multi_select_static", "input"}
+    ]
+    _agent_log(
+        "A",
+        "cards.py:build_supplier_form",
+        "form controls built",
+        {"controls": select_keys},
+    )
+    # endregion
     form_elements.append(
         _callback_button(
             name="submit_form",

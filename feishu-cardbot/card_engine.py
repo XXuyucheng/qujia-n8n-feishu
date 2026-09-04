@@ -172,9 +172,33 @@ class CardEngine:
 
         if action == ACTION_OPEN_FORM:
             payload = {"skill_id": self.config.get("skill_id"), "data": {}, "active_rules": []}
+            card = build_supplier_form(self.config, data={})
+            # region agent log
+            from cards import _agent_log
+
+            form_el = next(
+                (
+                    e
+                    for e in ((card.get("body") or {}).get("elements") or [])
+                    if e.get("tag") == "form"
+                ),
+                {},
+            )
+            labeled = [
+                e.get("tag")
+                for e in (form_el.get("elements") or [])
+                if "label" in e
+            ]
+            _agent_log(
+                "C",
+                "card_engine.py:handle_action",
+                "open_form callback card",
+                {"labeled_tags": labeled, "form_child_count": len(form_el.get("elements") or [])},
+            )
+            # endregion
             return (
                 callback_payload(
-                    card=build_supplier_form(self.config, data={}),
+                    card=card,
                     toast_text="开始录入",
                 ),
                 STATE_COLLECTING,

@@ -157,7 +157,7 @@ services:
       - FEISHU_CARDBOT_CONFIG_DIR=/app/config
       - CARDBOT_DB_PATH=/data/sessions.sqlite
       - CARDBOT_PORT=8050
-      - CARDBOT_ENABLE_WS=false
+      - CARDBOT_ENABLE_WS=true
       - CARDBOT_ENABLE_INJECT=true
       - FEISHU_CHAT_APP_ID=${FEISHU_CHAT_APP_ID}
       - FEISHU_CHAT_APP_SECRET=${FEISHU_CHAT_APP_SECRET}

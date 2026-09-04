@@ -77,9 +77,33 @@ def _maybe_send(
         return {"sent": False, "skipped": "no_credentials_or_send_disabled"}
     try:
         data = feishu.send_card(receive_id, card, receive_id_type=receive_id_type)
+        # region agent log
+        from cards import _agent_log
+
+        _agent_log(
+            "B",
+            "handlers.py:_maybe_send",
+            "send_card ok",
+            {"header": (card.get("header") or {}).get("title")},
+        )
+        # endregion
         return {"sent": True, "message": data}
     except FeishuAPIError as exc:
         logger.error("send card failed: %s", exc.message)
+        # region agent log
+        from cards import _agent_log
+
+        _agent_log(
+            "B",
+            "handlers.py:_maybe_send",
+            "send_card failed",
+            {
+                "error": exc.message[:500],
+                "feishu_code": exc.feishu_code,
+                "header": (card.get("header") or {}).get("title"),
+            },
+        )
+        # endregion
         return {"sent": False, "error": exc.message}
 
 
