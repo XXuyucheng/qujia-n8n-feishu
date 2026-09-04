@@ -21,6 +21,7 @@ files/
 feishu-listener/data/
 feishu-field-parser/data/
 feishu-bot/data/
+feishu-cardbot/data/
 backup-broken/
 
 # Databases and logs

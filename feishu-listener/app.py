@@ -1949,12 +1949,22 @@ def start_ws_client() -> None:
 _chat_ws_proc: Optional[Any] = None
 
 
+def _chat_ws_enabled() -> bool:
+    """对话应用长连接开关。切流到 feishu-cardbot 时设 FEISHU_CHAT_WS_ENABLED=false。"""
+    explicit = os.getenv("FEISHU_CHAT_WS_ENABLED")
+    if explicit is not None and explicit.strip() != "":
+        return explicit.strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("LISTENER_DISABLE_CHAT_WS", "").lower() not in {"1", "true", "yes"}
+
+
 def start_chat_ws_client() -> None:
     """Spawn chat-app WS in a child process (lark SDK cannot run two Clients in one process)."""
     global _chat_ws_proc
-    if os.getenv("LISTENER_DISABLE_CHAT_WS", "").lower() in {"1", "true", "yes"}:
+    if not _chat_ws_enabled():
         state["chat_ws_status"] = "disabled"
-        logger.info("chat websocket listener disabled by LISTENER_DISABLE_CHAT_WS")
+        logger.info(
+            "chat websocket listener disabled by FEISHU_CHAT_WS_ENABLED/LISTENER_DISABLE_CHAT_WS"
+        )
         return
 
     app_id = os.getenv("FEISHU_CHAT_APP_ID", "")

@@ -12,6 +12,7 @@
 | `feishu-field-parser` | 飞书多维表格字段解析 | 8020 |
 | `feishu-files-generation` | 合同 / 出团计划单等文档生成 | 8030 |
 | `feishu-bot` | 飞书对话机器人（Skill 平台） | 8040 |
+| `feishu-cardbot` | 飞书卡片交互机器人（供应商录入；默认不启长连接） | 8050 |
 
 入口配置见 [`compose.yaml`](compose.yaml)。
 
@@ -27,6 +28,7 @@ feishu-field-parser/  # 字段解析
 feishu-files-generation/
 feishu-bot/           # 对话机器人（录入 Form Engine；查询转发 n8n）
 feishu-bot/n8n/       # 查询 Agent / 知识库同步工作流模板（导入 n8n，勿当录入引擎）
+feishu-cardbot/       # 卡片交互机器人（供应商录入；默认不启 WS）
 ```
 
 工作流在 n8n 编辑器里维护（数据在 `n8n-data/`）；JSON 导出、设计稿等不入库。

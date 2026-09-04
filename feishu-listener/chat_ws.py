@@ -61,6 +61,10 @@ def forward(raw: Any) -> None:
 
 
 def main() -> None:
+    enabled = os.getenv("FEISHU_CHAT_WS_ENABLED", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        logger.info("FEISHU_CHAT_WS_ENABLED is false; chat ws exiting")
+        return
     app_id = os.getenv("FEISHU_CHAT_APP_ID", "")
     app_secret = os.getenv("FEISHU_CHAT_APP_SECRET", "")
     if not app_id or not app_secret:

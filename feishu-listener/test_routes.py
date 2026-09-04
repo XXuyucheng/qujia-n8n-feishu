@@ -1,9 +1,11 @@
 import json
+import os
 import unittest
 from copy import deepcopy
 from pathlib import Path
 
 from app import (
+    _chat_ws_enabled,
     _value_matches,
     actions_match,
     canonical_action_name,
@@ -449,6 +451,22 @@ class AppIdAndImNormalizeTests(unittest.TestCase):
         self.assertFalse(route_matches(route_miss_text, event))
         self.assertFalse(route_matches(route_miss_chat, event))
         self.assertFalse(route_matches(route_miss_app, event))
+
+
+class ChatWsSwitchTests(unittest.TestCase):
+    def test_default_enabled(self):
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {}, clear=False):
+            os.environ.pop("FEISHU_CHAT_WS_ENABLED", None)
+            os.environ.pop("LISTENER_DISABLE_CHAT_WS", None)
+            self.assertTrue(_chat_ws_enabled())
+
+    def test_feishu_chat_ws_enabled_false(self):
+        from unittest.mock import patch
+
+        with patch.dict("os.environ", {"FEISHU_CHAT_WS_ENABLED": "false"}, clear=False):
+            self.assertFalse(_chat_ws_enabled())
 
 
 if __name__ == "__main__":

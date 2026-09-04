@@ -11,6 +11,8 @@
 
 同一进程无法跑两个 lark WS Client（asyncio 冲突），故对话应用使用子进程。健康检查字段：`ws_status`、`chat_ws_status`、`chat_ws_pid`。
 
+将对话 IM 切到 `feishu-cardbot` 长连接前：在 `.env` 设 `FEISHU_CHAT_WS_ENABLED=false` 后 **由你择时重启** listener，否则两条长连接会互踢。兼容旧变量 `LISTENER_DISABLE_CHAT_WS=true`。
+
 对话 IM 路由示例见 `config.yaml` 中 `feishu-bot-im-message`（转发至 `http://feishu-bot:8040/api/message`）。供应商表 → 知识库同步走独立路由 `kb-sync-bitable`（默认停用，目标为 n8n webhook，**不要**接到对话 `/api/message`）。
 
 ## 运行方式

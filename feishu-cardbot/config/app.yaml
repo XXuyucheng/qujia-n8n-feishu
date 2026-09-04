@@ -1,0 +1,16 @@
+# 卡片交互机器人全局配置（供应商录入）
+session_ttl_minutes: 5
+default_locale: zh-CN
+
+# 机器人自定义菜单 event_key（开发者后台需一致）
+menu_event_key: add_supplier
+
+channels:
+  reply_mode: card
+
+permissions:
+  overwrite_open_ids: [ou_8dd0ac5df99798afe9745d5e0e97d650]
+
+idle_help: |
+  点击「录入供应商」或发送任意文字，打开供应商录入卡片。
+  收款码请在打开表单后以图片消息发送。
