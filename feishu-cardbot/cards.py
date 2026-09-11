@@ -4,53 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional
 
-# region agent log
-def _agent_log(hypothesis_id: str, location: str, message: str, data: Any = None) -> None:
-    import json
-    import time
-    import urllib.request
-
-    payload = {
-        "sessionId": "e9b13d",
-        "runId": "post-fix",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data if data is not None else {},
-        "timestamp": int(time.time() * 1000),
-    }
-    line = json.dumps(payload, ensure_ascii=False) + "\n"
-    for path in (
-        "/Users/xuyucheng/My_project/n8n/.cursor/debug-e9b13d.log",
-        "/app/.cursor-debug-e9b13d.log",
-    ):
-        try:
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(line)
-        except Exception:
-            pass
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    for url in (
-        "http://host.docker.internal:7828/ingest/ef15f0ab-2bbe-49ed-97a7-590afdf8b03d",
-        "http://127.0.0.1:7828/ingest/ef15f0ab-2bbe-49ed-97a7-590afdf8b03d",
-    ):
-        try:
-            req = urllib.request.Request(
-                url,
-                data=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Debug-Session-Id": "e9b13d",
-                },
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=0.5)
-        except Exception:
-            pass
-
-
-# endregion
-
 
 def _plain(text: str) -> Dict[str, str]:
     return {"tag": "plain_text", "content": str(text or "")}
@@ -67,6 +20,16 @@ def _option(label: str, value: Optional[str] = None) -> Dict[str, Any]:
 
 def _header(title: str, template: str = "blue") -> Dict[str, Any]:
     return {"title": _plain(title), "template": template}
+
+
+def field_snapshot(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """确认/覆盖按钮上的精简字段快照，会话丢失时仍可写表。"""
+    out: Dict[str, Any] = {}
+    for key, val in (data or {}).items():
+        if val in (None, "", []):
+            continue
+        out[key] = val
+    return out
 
 
 def _callback_button(
@@ -252,20 +215,6 @@ def build_supplier_form(
             form_elements.append(_select_element(key, cfg, data))
         else:
             form_elements.append(_input_element(key, cfg, data))
-    # region agent log
-    select_keys = [
-        {k: el.get(k) for k in ("tag", "name") if k in el}
-        | {"has_label": "label" in el}
-        for el in form_elements
-        if el.get("tag") in {"select_static", "multi_select_static", "input"}
-    ]
-    _agent_log(
-        "A",
-        "cards.py:build_supplier_form",
-        "form controls built",
-        {"controls": select_keys},
-    )
-    # endregion
     form_elements.append(
         _callback_button(
             name="submit_form",
@@ -318,6 +267,7 @@ def build_confirm(runtime: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, An
                                 text="确认写入",
                                 action="confirm_write",
                                 button_type="primary",
+                                extra={"data": field_snapshot(data)},
                             )
                         ],
                     },
@@ -350,7 +300,16 @@ def build_confirm(runtime: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, An
     )
 
 
-def build_overwrite(runtime: Dict[str, Any], *, detail: str) -> Dict[str, Any]:
+def build_overwrite(
+    runtime: Dict[str, Any],
+    *,
+    detail: str,
+    data: Optional[Dict[str, Any]] = None,
+    existing_record_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    extra: Dict[str, Any] = {"data": field_snapshot(data)}
+    if existing_record_id:
+        extra["existing_record_id"] = str(existing_record_id)
     return wrap_card(
         header_title="检测到重复记录",
         template="orange",
@@ -370,6 +329,7 @@ def build_overwrite(runtime: Dict[str, Any], *, detail: str) -> Dict[str, Any]:
                                 text="覆盖",
                                 action="overwrite",
                                 button_type="primary",
+                                extra=extra,
                             )
                         ],
                     },

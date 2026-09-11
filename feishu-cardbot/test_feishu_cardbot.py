@@ -20,12 +20,13 @@ from card_engine import (
     ACTION_CONFIRM_WRITE,
     ACTION_OVERWRITE,
     ACTION_SUBMIT_FORM,
+    EXPIRED_WRITE_TOAST,
     STATE_AWAIT_OVERWRITE,
     STATE_COLLECTING,
     STATE_CONFIRMING,
     CardEngine,
 )
-from cards import build_supplier_form, build_welcome, collect_select_options
+from cards import build_confirm, build_supplier_form, build_welcome, collect_select_options
 from config_loader import load_platform, load_supplier_runtime
 from handlers import handle_card_action, parse_im_content, session_key
 from session_store import SessionStore
@@ -37,14 +38,25 @@ RUNTIME = load_supplier_runtime(CONFIG_DIR)
 CLIENT = TestClient(app)
 
 
-def _action_event(open_id: str, action: str, form_value: dict | None = None, token: str = "") -> dict:
+def _action_event(
+    open_id: str,
+    action: str,
+    form_value: dict | None = None,
+    token: str = "",
+    *,
+    extra: dict | None = None,
+    context: dict | None = None,
+) -> dict:
+    value = {"action": action}
+    if extra:
+        value.update(extra)
     return {
         "operator": {"open_id": open_id},
-        "context": {"open_id": open_id, "chat_type": "p2p"},
+        "context": context or {"open_id": open_id, "chat_type": "p2p"},
         "token": token,
         "action": {
             "tag": "button",
-            "value": {"action": action},
+            "value": value,
             "form_value": form_value or {},
         },
     }
@@ -116,6 +128,29 @@ class CardBuildTests(unittest.TestCase):
         self.assertIn("submit_form", dumped)
         self.assertIn("cancel", dumped)
         self.assertNotIn("qrcode", options)
+
+    def test_confirm_button_embeds_snapshot(self):
+        card = build_confirm(RUNTIME, COMPLETE_FORM)
+        found = None
+
+        def walk(node):
+            nonlocal found
+            if isinstance(node, dict):
+                if node.get("tag") == "button":
+                    behaviors = node.get("behaviors") or [{}]
+                    val = (behaviors[0] or {}).get("value")
+                    if isinstance(val, dict) and val.get("action") == "confirm_write":
+                        found = val.get("data")
+                for item in node.values():
+                    walk(item)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(card)
+        self.assertIsInstance(found, dict)
+        self.assertEqual(found["supplier_name"], "德清茶歇A")
+        self.assertEqual(found["account_no"], "6222 001")
 
 
 class InjectSendCardTests(unittest.TestCase):
@@ -382,7 +417,149 @@ class DedupeWriteTests(unittest.TestCase):
         )
         self.assertIsNone(done["state"])
         feishu.create_record.assert_called_once()
+        fields = feishu.create_record.call_args.kwargs["fields"]
+        self.assertTrue(fields)
+        self.assertIn("供应商", fields)
+        self.assertEqual(fields["供应商"], "德清茶歇A")
         self.assertIn("rec_new", str(done["callback"]))
+
+    def test_confirm_without_session_does_not_write(self):
+        feishu = MagicMock()
+        store = SessionStore(Path(tempfile.mkdtemp()) / "empty.sqlite")
+        result = handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event("ou_empty", ACTION_CONFIRM_WRITE, token="e1"),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        feishu.create_record.assert_not_called()
+        feishu.search_records.assert_not_called()
+        self.assertEqual(result["state"], STATE_COLLECTING)
+        self.assertIn(EXPIRED_WRITE_TOAST, str(result["callback"]))
+
+    def test_second_confirm_does_not_write_empty(self):
+        feishu = MagicMock()
+        feishu.search_records.return_value = []
+        feishu.create_record.return_value = {"record_id": "rec_once"}
+        store = SessionStore(Path(tempfile.mkdtemp()) / "dup_confirm.sqlite")
+        handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event("ou_twice", ACTION_SUBMIT_FORM, COMPLETE_FORM, token="tw1"),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        first = handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event("ou_twice", ACTION_CONFIRM_WRITE, token="tw2"),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        self.assertIsNone(first["state"])
+        feishu.create_record.assert_called_once()
+        feishu.create_record.reset_mock()
+        feishu.search_records.reset_mock()
+        second = handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event("ou_twice", ACTION_CONFIRM_WRITE, token="tw3"),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        feishu.create_record.assert_not_called()
+        feishu.search_records.assert_not_called()
+        self.assertEqual(second["state"], STATE_COLLECTING)
+        self.assertIn(EXPIRED_WRITE_TOAST, str(second["callback"]))
+
+    def test_snapshot_writes_full_record_when_session_missing(self):
+        feishu = MagicMock()
+        feishu.search_records.return_value = []
+        feishu.create_record.return_value = {"record_id": "rec_snap"}
+        store = SessionStore(Path(tempfile.mkdtemp()) / "snap.sqlite")
+        snapshot = {
+            "supplier_name": "快照供应商",
+            "account_name": "李四",
+            "account_no": "6222001",
+            "bank_name": "中国工商银行",
+        }
+        done = handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event(
+                "ou_snap",
+                ACTION_CONFIRM_WRITE,
+                token="snap1",
+                extra={"data": snapshot},
+            ),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        self.assertIsNone(done["state"])
+        feishu.create_record.assert_called_once()
+        fields = feishu.create_record.call_args.kwargs["fields"]
+        self.assertTrue(fields)
+        self.assertEqual(fields["供应商"], "快照供应商")
+        self.assertEqual(fields["账号"], "6222001")
+        self.assertIn("rec_snap", str(done["callback"]))
+
+    def test_confirming_empty_data_does_not_create(self):
+        feishu = MagicMock()
+        engine = CardEngine(RUNTIME, feishu, open_id="ou_blank", dry_run=False)
+        session = {"state": STATE_CONFIRMING, "payload": {"data": {}, "active_rules": []}}
+        callback, state, _payload = engine.handle_action(
+            action=ACTION_CONFIRM_WRITE,
+            session=session,
+        )
+        feishu.create_record.assert_not_called()
+        self.assertEqual(state, STATE_COLLECTING)
+        self.assertIn(EXPIRED_WRITE_TOAST, str(callback))
+
+    def test_session_key_p2p_ignores_chat_id(self):
+        self.assertEqual(session_key("ou_1", "oc_x", "p2p"), "ou_1")
+        self.assertEqual(session_key("ou_1", "", "p2p"), "ou_1")
+        self.assertEqual(session_key("ou_1", "oc_g", "group"), "ou_1:oc_g")
+
+    def test_confirm_open_chat_id_reuses_p2p_session(self):
+        feishu = MagicMock()
+        feishu.search_records.return_value = []
+        feishu.create_record.return_value = {"record_id": "rec_key"}
+        store = SessionStore(Path(tempfile.mkdtemp()) / "skey.sqlite")
+        handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event("ou_jitter", ACTION_SUBMIT_FORM, COMPLETE_FORM, token="jk1"),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        done = handle_card_action(
+            runtime=RUNTIME,
+            event=_action_event(
+                "ou_jitter",
+                ACTION_CONFIRM_WRITE,
+                token="jk2",
+                context={
+                    "open_id": "ou_jitter",
+                    "chat_type": "group",
+                    "open_chat_id": "oc_jitter",
+                },
+            ),
+            store=store,
+            ttl_seconds=600,
+            feishu=feishu,
+            dry_run=False,
+        )
+        self.assertIsNone(done["state"])
+        feishu.create_record.assert_called_once()
+        fields = feishu.create_record.call_args.kwargs["fields"]
+        self.assertEqual(fields["供应商"], "德清茶歇A")
 
     def test_after_image_reaches_confirm_when_name_present(self):
         engine = CardEngine(RUNTIME, None, open_id="ou_img", dry_run=True)

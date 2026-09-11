@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -43,6 +44,9 @@ ACTION_CONFIRM_WRITE = "confirm_write"
 ACTION_BACK_TO_FORM = "back_to_form"
 ACTION_OVERWRITE = "overwrite"
 ACTION_CANCEL = "cancel"
+
+WRITE_STATES = {STATE_CONFIRMING, STATE_AWAIT_OVERWRITE}
+EXPIRED_WRITE_TOAST = "会话已过期，请重新录入"
 
 
 def _prompt(config: Dict[str, Any], key: str, default: str = "", **kwargs: Any) -> str:
@@ -104,6 +108,31 @@ def normalize_data(
     return data, problems, active_rules
 
 
+def merge_snapshot(data: Dict[str, Any], snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    merged = dict(data or {})
+    if not isinstance(snapshot, dict):
+        return merged
+    for key, val in snapshot.items():
+        if key not in merged or is_blank_value(merged.get(key)):
+            merged[key] = val
+    return merged
+
+
+def action_snapshot(action_value: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """从按钮 callback value 取出校验后的字段快照。"""
+    if not isinstance(action_value, dict):
+        return {}
+    raw = action_value.get("data")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {k: v for k, v in raw.items() if not is_blank_value(v)}
+
+
 def collect_problems(config: Dict[str, Any], data: Dict[str, Any], problems: List[str]) -> List[str]:
     fields_cfg = config.get("fields") or {}
     out = list(problems)
@@ -153,6 +182,7 @@ class CardEngine:
         action: str,
         session: Optional[Dict[str, Any]],
         form_value: Optional[Dict[str, Any]] = None,
+        action_value: Optional[Dict[str, Any]] = None,
     ) -> Tuple[Dict[str, Any], Optional[str], Optional[Dict[str, Any]]]:
         """处理一次卡片回传。
 
@@ -162,6 +192,8 @@ class CardEngine:
         data = dict(payload.get("data") or {})
         sticky = list(payload.get("active_rules") or [])
         action = str(action or "").strip()
+        snapshot = action_snapshot(action_value)
+        session_state = str((session or {}).get("state") or "")
 
         if action == ACTION_CANCEL:
             return (
@@ -173,29 +205,6 @@ class CardEngine:
         if action == ACTION_OPEN_FORM:
             payload = {"skill_id": self.config.get("skill_id"), "data": {}, "active_rules": []}
             card = build_supplier_form(self.config, data={})
-            # region agent log
-            from cards import _agent_log
-
-            form_el = next(
-                (
-                    e
-                    for e in ((card.get("body") or {}).get("elements") or [])
-                    if e.get("tag") == "form"
-                ),
-                {},
-            )
-            labeled = [
-                e.get("tag")
-                for e in (form_el.get("elements") or [])
-                if "label" in e
-            ]
-            _agent_log(
-                "C",
-                "card_engine.py:handle_action",
-                "open_form callback card",
-                {"labeled_tags": labeled, "form_child_count": len(form_el.get("elements") or [])},
-            )
-            # endregion
             return (
                 callback_payload(
                     card=card,
@@ -252,9 +261,21 @@ class CardEngine:
             )
 
         if action == ACTION_CONFIRM_WRITE:
+            data = merge_snapshot(data, snapshot)
+            if session_state not in WRITE_STATES and not snapshot:
+                return self._expired_write(data, payload)
+            if not data:
+                return self._expired_write(data, payload)
+            payload["data"] = data
             return self._write(data, payload, overwrite=False)
 
         if action == ACTION_OVERWRITE:
+            data = merge_snapshot(data, snapshot)
+            rid = ""
+            if isinstance(action_value, dict):
+                rid = str(action_value.get("existing_record_id") or "")
+            if rid:
+                payload["existing_record_id"] = rid
             if not can_overwrite(self.config, self.open_id):
                 detail = str(payload.get("dedupe_detail") or "记录已存在。")
                 return (
@@ -266,6 +287,11 @@ class CardEngine:
                     None,
                     None,
                 )
+            if session_state not in WRITE_STATES and not snapshot:
+                return self._expired_write(data, payload)
+            if not data:
+                return self._expired_write(data, payload)
+            payload["data"] = data
             return self._write(data, payload, overwrite=True)
 
         return (
@@ -346,13 +372,56 @@ class CardEngine:
         detail = "检测到重复：\n- " + "\n- ".join(details) if details else ""
         return hits, detail
 
+    def _expired_write(
+        self, data: Dict[str, Any], payload: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+        payload["data"] = dict(data or {})
+        payload["skill_id"] = self.config.get("skill_id")
+        return (
+            callback_payload(
+                card=build_supplier_form(self.config, data=data, problems=[EXPIRED_WRITE_TOAST]),
+                toast_text=EXPIRED_WRITE_TOAST,
+                toast_type="error",
+            ),
+            STATE_COLLECTING,
+            payload,
+        )
+
+    def _refuse_empty_write(
+        self,
+        data: Dict[str, Any],
+        payload: Dict[str, Any],
+        blocking: List[str],
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+        toast = blocking[0] if blocking else "没有可写入的字段，请重新录入"
+        payload["data"] = data
+        payload["skill_id"] = self.config.get("skill_id")
+        return (
+            callback_payload(
+                card=build_supplier_form(self.config, data=data, problems=blocking or [toast]),
+                toast_text=toast,
+                toast_type="error",
+            ),
+            STATE_COLLECTING,
+            payload,
+        )
+
     def _write(
         self, data: Dict[str, Any], payload: Dict[str, Any], *, overwrite: bool
     ) -> Tuple[Dict[str, Any], Optional[str], Optional[Dict[str, Any]]]:
+        sticky = list(payload.get("active_rules") or [])
+        data, problems, sticky = normalize_data(
+            self.config, data, sticky_rules=sticky
+        )
+        payload["data"] = data
+        payload["active_rules"] = sticky
+        blocking = collect_problems(self.config, data, problems)
         fields_cfg = self.config.get("fields") or {}
         app_token = str(self.config.get("base_id") or "")
         table_id = str(self.config.get("table_id") or "")
         bitable_fields = build_bitable_fields(fields_cfg, data)
+        if blocking or not bitable_fields:
+            return self._refuse_empty_write(data, payload, blocking)
         dedupe = self.config.get("dedupe") or {}
         name_key = "supplier_name"
         if dedupe.get("fields"):
@@ -409,7 +478,12 @@ class CardEngine:
                 )
             return (
                 callback_payload(
-                    card=build_overwrite(self.config, detail=detail),
+                    card=build_overwrite(
+                        self.config,
+                        detail=detail,
+                        data=data,
+                        existing_record_id=str(payload.get("existing_record_id") or ""),
+                    ),
                     toast_text="检测到重复",
                     toast_type="info",
                 ),

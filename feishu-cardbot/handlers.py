@@ -14,9 +14,29 @@ logger = logging.getLogger("feishu-cardbot.handlers")
 
 
 def session_key(open_id: str, chat_id: str = "", chat_type: str = "p2p") -> str:
-    if chat_type == "group" and chat_id:
-        return f"{open_id}:{chat_id}"
+    chat_type = (chat_type or "p2p").lower()
+    if chat_type in {"group", "public"} and chat_id:
+        return f"{open_id}:{chat_id}" if open_id else chat_id
     return open_id or chat_id
+
+
+def resolve_session_key(
+    store: SessionStore,
+    open_id: str,
+    chat_id: str = "",
+    chat_type: str = "p2p",
+) -> str:
+    """卡片回调 chat_type / chat_id 会抖动；命中已有会话的 key 优先。"""
+    primary = session_key(open_id, chat_id, chat_type)
+    if store.get(primary):
+        return primary
+    if open_id and open_id != primary and store.get(open_id):
+        return open_id
+    if open_id and chat_id:
+        grouped = f"{open_id}:{chat_id}"
+        if grouped != primary and store.get(grouped):
+            return grouped
+    return primary
 
 
 def receive_target(open_id: str, chat_id: str = "", chat_type: str = "p2p") -> Tuple[str, str]:
@@ -60,9 +80,6 @@ def parse_im_content(message: Dict[str, Any]) -> Tuple[str, list[str]]:
     if content.get("content"):
         walk(content["content"])
     return text, image_keys
-    if chat_type == "group" and chat_id:
-        return chat_id, "chat_id"
-    return open_id, "open_id"
 
 
 def _maybe_send(
@@ -77,33 +94,9 @@ def _maybe_send(
         return {"sent": False, "skipped": "no_credentials_or_send_disabled"}
     try:
         data = feishu.send_card(receive_id, card, receive_id_type=receive_id_type)
-        # region agent log
-        from cards import _agent_log
-
-        _agent_log(
-            "B",
-            "handlers.py:_maybe_send",
-            "send_card ok",
-            {"header": (card.get("header") or {}).get("title")},
-        )
-        # endregion
         return {"sent": True, "message": data}
     except FeishuAPIError as exc:
         logger.error("send card failed: %s", exc.message)
-        # region agent log
-        from cards import _agent_log
-
-        _agent_log(
-            "B",
-            "handlers.py:_maybe_send",
-            "send_card failed",
-            {
-                "error": exc.message[:500],
-                "feishu_code": exc.feishu_code,
-                "header": (card.get("header") or {}).get("title"),
-            },
-        )
-        # endregion
         return {"sent": False, "error": exc.message}
 
 
@@ -169,9 +162,9 @@ def handle_message(
         return {"ok": True, "skipped": "duplicate_message"}
 
     open_id = str(resource.get("open_id") or "")
-    chat_id = str(resource.get("chat_id") or "")
+    chat_id = str(resource.get("chat_id") or resource.get("open_chat_id") or "")
     chat_type = str(resource.get("chat_type") or "p2p")
-    skey = session_key(open_id, chat_id, chat_type)
+    skey = resolve_session_key(store, open_id, chat_id, chat_type)
     store.expire_if_stale(skey, ttl_seconds)
     session = store.get(skey)
     rid, rid_type = receive_target(open_id, chat_id, chat_type)
@@ -232,14 +225,16 @@ def handle_card_action(
     context = event.get("context") or {}
     action_obj = event.get("action") or {}
     open_id = str(operator.get("open_id") or context.get("open_id") or "")
-    chat_id = str(context.get("chat_id") or "")
+    chat_id = str(context.get("chat_id") or context.get("open_chat_id") or "")
     chat_type = str(context.get("chat_type") or "p2p")
 
-    skey = session_key(open_id, chat_id, chat_type)
+    skey = resolve_session_key(store, open_id, chat_id, chat_type)
     store.expire_if_stale(skey, ttl_seconds)
     session = store.get(skey)
 
     value = action_obj.get("value") or {}
+    if not isinstance(value, dict):
+        value = {}
     action = str(value.get("action") or "")
     form_value = action_obj.get("form_value") or {}
     token = str(event.get("token") or action_obj.get("name") or "")
@@ -255,6 +250,7 @@ def handle_card_action(
         action=action or ACTION_OPEN_FORM,
         session=session,
         form_value=form_value if isinstance(form_value, dict) else {},
+        action_value=value,
     )
     if new_state is None:
         store.clear(skey)
