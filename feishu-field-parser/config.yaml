@@ -4623,3 +4623,854 @@ tables:
         backFieldId: fldxYKnv1S
         tableId: tblsPwOQgzvbPNIP
         multiple: true
+  flow_records:
+    name: 流水表
+    table_id: tblqObCmK0l85u9s
+    fields:
+    - id: fld0H203Rl
+      type: 20
+      name: 余额
+      property:
+        dataType:
+          type: 202
+          property:
+            formatter: '0.00'
+          UIType: Number
+        formatter: '0.00'
+    - id: fldUwca63Q
+      type: 1
+      name: 贷方金额
+    - id: fldLFZjTiB
+      type: 20
+      name: 业务应收核对
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldZsL2GW3
+      type: 21
+      name: 打款编号
+      property:
+        multiple: true
+        backFieldId: fldEWar1Jm
+        tableId: tbluaFDknFwEPFTm
+    - id: fldtxGY7Ha
+      type: 19
+      name: 老表相同订单借方金额统计
+      property:
+        refFieldId: fldgI1ootl
+        refTableId: tblqObCmK0l85u9s
+    - id: fldumEF7AZ
+      type: 2
+      name: 手续费
+      property:
+        formatter: '0.00'
+    - id: fldzcOXfdV
+      type: 20
+      name: 自动分类
+      property:
+        dataType:
+          type: 3
+          property:
+            defaultValue: LastOption
+            options: &id001
+            - color: 37
+              id: opttEmkLXz
+              name: 业务收入
+            - id: optpyi3Vvy
+              name: 其他收入-结转上期
+              color: 37
+            - color: 35
+              id: optfWH1zYq
+              name: 其他收入
+            - color: 37
+              id: optsvvMHnP
+              name: 其他收入-利息
+            - id: optRK6mSm0
+              name: 历史往来
+              color: 43
+            - color: 43
+              id: optufcRDlg
+              name: 其他收入-余额调整
+            - name: 部门支出/报销/行政采买
+              color: 41
+              id: optgZb5gXw
+            - color: 41
+              id: optYbuP23W
+              name: 部门支出/报销/平台推广
+            - color: 41
+              id: optqa2XlVr
+              name: 部门支出/报销/通讯费
+            - name: 其他收入-代收
+              color: 43
+              id: opt1sNkQTN
+            - color: 37
+              id: opt4u5N39f
+              name: 其他收入-营业外
+            - color: 37
+              id: opt6eFis9X
+              name: 其他收入-投资分红
+            - color: 35
+              id: optONUXnLh
+              name: 其他支出
+            - name: 部门支出/税费
+              color: 41
+              id: opthAQeRY9
+            - name: 业务支出
+              color: 33
+              id: opttIMYbJn
+            - color: 41
+              id: optR8HaaIN
+              name: 部门支出/薪资
+            - color: 41
+              id: opt6j993Zf
+              name: 部门支出/兼职
+            - color: 41
+              id: optWOYlmFw
+              name: 其他支出-股利
+            - color: 41
+              id: optpOoWm8S
+              name: 部门支出/充值
+            - name: 部门支出/个人所得税
+              color: 41
+              id: optjVwZmEL
+            - name: 部门支出/公积金
+              color: 41
+              id: optRDjGq6e
+            - color: 41
+              id: optqZvLji4
+              name: 部门支出/报销/团建福利费
+            - color: 41
+              id: opt9meNamd
+              name: 部门支出/社保
+            - color: 41
+              id: opt0HfZAEF
+              name: 部门支出/报销/水电费
+            - id: optkV7uCxS
+              name: 部门支出/报销/招待费
+              color: 41
+            - id: optilPwJPa
+              name: 部门支出/报销/代理记账注册
+              color: 41
+            - color: 43
+              id: opt0shzckc
+              name: 部门支出/代缴
+            - color: 41
+              id: optkL2nY0g
+              name: 部门支出/报销/踩点/培训
+            - id: opt15EFA6X
+              name: 部门支出/报销/道具采购
+              color: 41
+            - name: 部门支出/报销/转介绍礼品
+              color: 41
+              id: optyI6Zkym
+            - name: 其他支出-贷款
+              color: 41
+              id: optp6UKwN0
+            - color: 41
+              id: optZpCsf7T
+              name: 部门支出/报销/房租费
+            - color: 41
+              id: optU9j7YPE
+              name: 部门支出/报销/押金
+            - color: 41
+              id: opt8SuA4Zh
+              name: 其他支出-所得税
+            - color: 41
+              id: optJsWme3n
+              name: 其他支出-分红
+            - id: opt3842pM2
+              name: 其他支出-余额调整
+              color: 43
+            - color: 41
+              id: optp0IwOOB
+              name: 部门支出/快递
+            - name: 部门支出/横幅
+              color: 41
+              id: opt0fn8lLE
+            - color: 43
+              id: optobGm5xJ
+              name: 业务收入/往来款
+            - color: 41
+              id: optLcY5Wtm
+              name: 部门支出/股利
+            - name: 业务收入/往来
+              color: 43
+              id: opt3DcYqCJ
+            - color: 37
+              id: optNqljoKD
+              name: 业务收入-合并含往来
+            - name: 业务收入-合并含走账
+              color: 37
+              id: opt44ILNIZ
+            - id: optjMa7zQA
+              name: 业务支出/往来
+              color: 43
+            - color: 43
+              id: optgDImFwS
+              name: 业务收入/走账
+            - color: 43
+              id: optHL7h2Eq
+              name: 业务支出/走账
+            - color: 41
+              id: optBfhpKvy
+              name: 部门支出/报销/物业费
+            - color: 37
+              id: optJg1wjyQ
+              name: 业务收入-合并含往来走账
+            - color: 43
+              id: optpAiC1mt
+              name: 子记录合并
+            - color: 43
+              id: optFUOqKsA
+              name: 业务外收入/代收
+            - id: optSqcUM8X
+              name: 部门支出/报销/代理法务
+              color: 7
+            - id: optkjMPD5d
+              name: ''
+              color: 5
+            optionsType: 0
+          UIType: SingleSelect
+        formatter: ''
+        options: *id001
+    - id: fldJvqBtlw
+      type: 1
+      name: 支出日期
+    - id: fldSoWBhYg
+      type: 21
+      name: 关联业务收入
+      property:
+        multiple: true
+        backFieldId: fldSXHw7PK
+        tableId: tblABGfJ0B1sE5tV
+    - id: fldwSlM1Er
+      type: 20
+      name: 贷方金额计算
+      property:
+        dataType:
+          type: 202
+          property:
+            formatter: '0.00'
+          UIType: Number
+        formatter: '0.00'
+    - id: fldGPoHYw3
+      type: 3
+      name: 分类
+      property:
+        options:
+        - name: 其他支出
+          color: 30
+          id: optoHtcnf6
+        - color: 42
+          id: opt5j0Bj22
+          name: 账户余额调整
+        - color: 26
+          id: optiIprbxE
+          name: 业务收入
+        - color: 26
+          id: optJzcrAO7
+          name: 其他收入-利息
+        - color: 42
+          id: optIXYTt96
+          name: 往来款-
+        - color: 33
+          id: optvTDXMGp
+          name: 业务支出
+        - color: 33
+          id: optxgxqjpt
+          name: 部门支出
+        - color: 5
+          id: optCQJQTyJ
+          name: 结转上期
+        - id: optqdOTSmY
+          name: 合并支出
+          color: 43
+        - color: 31
+          id: opt4wAMqLg
+          name: 合并收入
+        - name: 营业外收入
+          color: 26
+          id: optIqiSRaH
+        - id: optJYnWGkS
+          name: 业务收入-定金
+          color: 37
+        - color: 37
+          id: optiLhtjVR
+          name: 业务收入-预收款
+        - color: 37
+          id: opt1pnpY8M
+          name: 业务收入-尾款
+        - name: 业务收入-返点
+          color: 37
+          id: optCkLWDvm
+        - color: 37
+          id: optVgLxjCM
+          name: 业务收入-退押金
+        - color: 37
+          id: optuASxcdV
+          name: 其他收入-代收
+        - color: 37
+          id: optjcUG5h8
+          name: 其他收入-投资分红
+        - color: 5
+          id: optD2xabfN
+          name: 业务支出-定金
+        - color: 33
+          id: opts6o1mez
+          name: 业务支出-尾款
+        - color: 33
+          id: optNemWlzp
+          name: 其他支出-兼职工资
+        - color: 33
+          id: optX036UIo
+          name: 其他支出-薪资
+        - name: 其他支出-社保
+          color: 33
+          id: optUP6hz5A
+        - color: 33
+          id: optuZC25Rb
+          name: 其他支出-公积金
+        - color: 33
+          id: optQ9wf0nF
+          name: 其他支出-报销
+        - name: 其他支出-充值
+          color: 33
+          id: optCbGwJTA
+        - id: opt49UxMo4
+          name: 其他支出-代缴
+          color: 33
+        - color: 33
+          id: optsVDAO7k
+          name: 其他支出-投资
+        - color: 33
+          id: optLfi6LDH
+          name: 其他支出-税费
+        - name: 其他支出-个人所得税
+          color: 33
+          id: opthmp12m9
+        - id: optk3Zyqgj
+          name: 其他支出-股利
+          color: 3
+        - color: 0
+          id: optytak6N4
+          name: 收入-待关联
+        - id: optCKBjO8m
+          name: 支出-待关联
+          color: 1
+        - color: 1
+          id: opt5d8kp9Y
+          name: 25年应收未收
+        - id: opthA5U8Dv
+          name: 25年应付未付
+          color: 0
+        - color: 10
+          id: optYxyb4dP
+          name: 4.1之前的账单
+    - id: fldFjGUqya
+      type: 1
+      name: 老表匹配单号
+    - id: fldbwEjRiI
+      type: 25
+      name: 支出凭证识别
+    - id: fld0hrCo5a
+      type: 20
+      name: 回款周期-统计
+      property:
+        dataType:
+          type: 202
+        formatter: ''
+    - id: fldsf11Red
+      type: 1
+      name: 动账日期
+    - id: fldStA9ee4
+      type: 25
+      name: 收款识别-收入
+    - id: fld7DFgjH7
+      type: 1
+      name: 收款账户
+    - id: fldE1E4i07
+      type: 1
+      name: 收入单号
+    - id: fldNjT3IoI
+      type: 20
+      name: 关联收入类型列表
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldEaeU3ec
+      type: 21
+      name: 业务外收入
+      property:
+        multiple: true
+        backFieldId: fldXfwEd7k
+        tableId: tblI3GEXIMwqKjzy
+    - id: fld29bZDY2
+      type: 20
+      name: 帐期毛利-统计
+      property:
+        dataType:
+          type: 202
+        formatter: ''
+    - id: fldszsheS5
+      type: 21
+      name: 充值帐户余额
+      property:
+        multiple: true
+        backFieldId: fldmkPRYYt
+        tableId: tblsPwOQgzvbPNIP
+    - id: fldqmtB9A5
+      type: 18
+      name: 父记录
+      property:
+        multiple: false
+        tableId: tblqObCmK0l85u9s
+    - id: fldF59TKgT
+      type: 21
+      name: 客户表
+      property:
+        multiple: true
+        backFieldId: fldGAQnnwV
+        tableId: tblplCg1voA7Xjgi
+    - id: fldpBp1FLE
+      type: 1005
+      name: 流水编号
+    - id: fld54OEJa0
+      type: 19
+      name: 支出金额
+      property:
+        refFieldId: fldpgLa2Zr
+        refTableId: tbluaFDknFwEPFTm
+    - id: fldsNjUkZk
+      type: 3
+      name: 收款备注
+      property:
+        options:
+        - id: opthzAUNOa
+          name: 扫码-微信
+          color: 0
+        - color: 1
+          id: optqkBltG3
+          name: 扫码-支付宝
+        - color: 2
+          id: optqM81919
+          name: 扫码-杭州趣加旅行社服务有限公司
+        - name: 扫码-杭州趣加文化创意有限公司
+          color: 3
+          id: optM8qj8hA
+        - name: 扫码-杭州趣加企业管理咨询有限公司
+          color: 4
+          id: optuL9Fcet
+        - id: optgUlA5B1
+          name: 扫码-杨晓恩支付宝
+          color: 5
+    - id: fldGHa9w1H
+      type: 20
+      name: 订单编号
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: flduxirq3w
+      type: 1002
+      name: 最后更新时间
+      property:
+        displayTimeZone: false
+        dateFormat: yyyy/MM/dd
+    - id: fldRmSKnHF
+      type: 19
+      name: 业务收入类型
+      property:
+        refFieldId: fldw9sa0WQ
+        refTableId: tblABGfJ0B1sE5tV
+    - id: fldoMye9iX
+      type: 17
+      name: 流水凭证-收
+    - id: fldjoj1LvB
+      type: 1
+      name: 收款识别输出
+    - id: fldeTj8Peg
+      type: 3
+      name: 分类 备份5.26
+      property:
+        options:
+        - id: optoHtcnf6
+          name: 其他支出
+          color: 30
+        - color: 42
+          id: opt5j0Bj22
+          name: 账户余额调整
+        - id: optiIprbxE
+          name: 业务收入
+          color: 26
+        - id: optJzcrAO7
+          name: 其他收入-利息
+          color: 26
+        - color: 42
+          id: optIXYTt96
+          name: 往来款-
+        - color: 33
+          id: optvTDXMGp
+          name: 业务支出
+        - color: 33
+          id: optxgxqjpt
+          name: 部门支出
+        - color: 5
+          id: optCQJQTyJ
+          name: 结转上期
+        - color: 43
+          id: optqdOTSmY
+          name: 合并支出
+        - color: 31
+          id: opt4wAMqLg
+          name: 合并收入
+        - color: 26
+          id: optIqiSRaH
+          name: 营业外收入
+        - color: 37
+          id: optJYnWGkS
+          name: 业务收入-定金
+        - name: 业务收入-预收款
+          color: 37
+          id: optiLhtjVR
+        - color: 37
+          id: opt1pnpY8M
+          name: 业务收入-尾款
+        - color: 37
+          id: optCkLWDvm
+          name: 业务收入-返点
+        - color: 37
+          id: optVgLxjCM
+          name: 业务收入-退押金
+        - color: 37
+          id: optuASxcdV
+          name: 其他收入-代收
+        - color: 37
+          id: optjcUG5h8
+          name: 其他收入-投资分红
+        - color: 5
+          id: optD2xabfN
+          name: 业务支出-定金
+        - color: 33
+          id: opts6o1mez
+          name: 业务支出-尾款
+        - id: optNemWlzp
+          name: 其他支出-兼职工资
+          color: 33
+        - id: optX036UIo
+          name: 其他支出-薪资
+          color: 33
+        - color: 33
+          id: optUP6hz5A
+          name: 其他支出-社保
+        - color: 33
+          id: optuZC25Rb
+          name: 其他支出-公积金
+        - color: 33
+          id: optQ9wf0nF
+          name: 其他支出-报销
+        - color: 33
+          id: optCbGwJTA
+          name: 其他支出-充值
+        - color: 33
+          id: opt49UxMo4
+          name: 其他支出-代缴
+        - color: 33
+          id: optsVDAO7k
+          name: 其他支出-投资
+        - color: 33
+          id: optLfi6LDH
+          name: 其他支出-税费
+        - color: 33
+          id: opthmp12m9
+          name: 其他支出-个人所得税
+        - color: 3
+          id: optk3Zyqgj
+          name: 其他支出-股利
+        - color: 0
+          id: optytak6N4
+          name: 收入-待关联
+        - color: 1
+          id: optCKBjO8m
+          name: 支出-待关联
+        - color: 1
+          id: opt5d8kp9Y
+          name: 25年应收未收
+        - id: opthA5U8Dv
+          name: 25年应付未付
+          color: 0
+        - color: 10
+          id: optYxyb4dP
+          name: 4.1之前的账单
+    - id: fldl2Slh8a
+      type: 1004
+      name: 修改人
+    - id: fldphQMiHm
+      type: 5
+      name: 记账日期
+      property:
+        displayTimeZone: false
+        autoFill: false
+        dateFormat: yyyy/MM/dd
+    - id: fldoE2Qt0P
+      type: 1
+      name: 老表流水编号
+    - id: fldfbbzuVi
+      type: 20
+      name: 打款业务支出分类
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldQGhB7d7
+      type: 1
+      name: 支出凭证识别.输出结果
+    - id: fld8JK3AUN
+      type: 1003
+      name: 创建人
+    - id: fld0Eowbty
+      type: 20
+      name: 银行账户
+      property:
+        dataType:
+          type: 3
+          property:
+            defaultValue: LastOption
+            options: &id002
+            - color: 0
+              id: optVtewCzS
+              name: 支付宝
+            - id: optYqZEegd
+              name: 微信
+              color: 5
+            - color: 3
+              id: optCA2ywOm
+              name: 趣加旅社
+            - color: 6
+              id: opt72SpkTS
+              name: 趣伽
+            - color: 7
+              id: opt3I4SAre
+              name: 富阳途臻
+            - name: 唾沫钉
+              color: 3
+              id: opt2jii74Q
+            - color: 6
+              id: optayfC1of
+              name: 企业咨询
+            - name: 旅苑第一分公司
+              color: 7
+              id: optw22cGd5
+            - color: 8
+              id: optHDPzrNy
+              name: 趣顽
+            - color: 9
+              id: optKc5MDTh
+              name: 体育策划
+            - color: 10
+              id: optNws1Pe5
+              name: 典金
+            - color: 0
+              id: optGuZxEnv
+              name: 文创台州
+            - name: 杭州体育
+              color: 2
+              id: optf8zOOmB
+            - name: 鱼生活动
+              color: 2
+              id: optIKNuKsN
+            - name: ⚠️流水录入错误
+              color: 4
+              id: optz0pyz7t
+            - color: 1
+              id: optSMksbWv
+              name: 渐渐文化
+            - id: opt7tMonJv
+              name: 华可文化
+              color: 4
+            - name: 文创杭州银行
+              color: 1
+              id: optkFU5XHW
+            - color: 5
+              id: optaLVW7hT
+              name: ''
+            optionsType: 0
+          UIType: SingleSelect
+        formatter: ''
+        options: *id002
+    - id: fldgI1ootl
+      type: 20
+      name: 借方金额计算
+      property:
+        dataType:
+          type: 202
+          property:
+            formatter: '0.00'
+          UIType: Number
+        formatter: '0.00'
+    - id: fld3Exz0Mp
+      type: 20
+      name: 打款部门支出分类
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: flduJjUvXB
+      type: 1
+      name: 我方账户
+    - id: fldfxPWklz
+      type: 1
+      name: 老表合并打款编号
+    - id: fld7zHhTzL
+      type: 17
+      name: 流水凭证-支
+    - id: fld5LxpC9X
+      type: 1
+      name: 网银收支备注
+    - id: fldsTSDuCz
+      type: 19
+      name: 财务打款表打款备注
+      property:
+        refFieldId: fldBGhJ2zf
+        refTableId: tbluaFDknFwEPFTm
+    - id: fldGkvehyD
+      type: 19
+      name: 供应商
+      property:
+        refFieldId: fldDd0kRYm
+        refTableId: tbluaFDknFwEPFTm
+    - id: fldmowi0bi
+      type: 3
+      name: 打款账号
+      property:
+        options:
+        - color: 7
+          id: optHFiiDwb
+          name: 富阳途臻
+        - name: 趣加旅社
+          color: 5
+          id: optnkRj59a
+        - color: 7
+          id: optbcOBUH8
+          name: 趣伽
+        - id: optGpKQVIL
+          name: 支付宝
+          color: 3
+        - color: 2
+          id: optZPS7XoY
+          name: 微信
+        - name: 鱼生活动
+          color: 0
+          id: optNtXX2ds
+        - color: 1
+          id: optcgBDPLS
+          name: 杭州体育
+        - color: 0
+          id: optvmUkYO3
+          name: 微信
+        - color: 4
+          id: opteRIMXN9
+          name: 旅苑第一分公司
+        - name: 非资金账户
+          color: 6
+          id: optEPjKDqf
+        - name: 唾沫钉
+          color: 7
+          id: optBnNdHYR
+        - color: 8
+          id: optMVPbPH5
+          name: 体育策划
+        - name: 典金
+          color: 9
+          id: optsRSzqJE
+        - color: 0
+          id: optRXilYHJ
+          name: 企业咨询
+        - color: 1
+          id: optsVhqGhl
+          name: 文创台州
+        - color: 2
+          id: optTYc8SlV
+          name: 趣顽
+        - color: 3
+          id: optasctUJG
+          name: 文创杭州银行
+        - color: 5
+          id: opt2JdKzw2
+          name: 鱼生活动
+        - color: 6
+          id: opttw6da8d
+          name: 典金
+    - id: flduMK79zq
+      type: 1001
+      name: 创建时间
+      property:
+        displayTimeZone: false
+        dateFormat: yyyy/MM/dd
+    - id: fldZdctiNj
+      type: 20
+      name: 记账月份
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldr22ANgy
+      type: 19
+      name: 业务收入金额
+      property:
+        refFieldId: fldP4pCStc
+        refTableId: tblABGfJ0B1sE5tV
+    - id: fldmvel5AC
+      type: 20
+      name: 帐期净利-统计
+      property:
+        dataType:
+          type: 202
+        formatter: ''
+    - id: fldPTg9Oih
+      type: 1
+      name: 借方金额
+    - id: fldolpnBAv
+      type: 20
+      name: 归帐月份
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldRah9jFv
+      type: 20
+      name: 开票金额
+      property:
+        dataType:
+          type: 201
+        formatter: ''
+    - id: fldXrYIJtj
+      type: 20
+      name: 归帐日期
+      property:
+        dataType:
+          type: 5
+          property:
+            autoFill: false
+            dateFormat: yyyy/MM/dd
+            timeFormat: ''
+          UIType: DateTime
+        formatter: yyyy/MM/dd
+        dateFormat: yyyy/MM/dd
+    - id: fldKoeXg20
+      type: 1
+      name: 老表打款备注
+    - id: fldqTmMtVj
+      type: 1
+      name: 对方账户
+    - id: fldCw8O4kf
+      type: 2
+      name: 老表往来编号
+      property:
+        formatter: '0'
+    - id: fldAJoRcKi
+      type: 2
+      name: 往来编号
+      property:
+        formatter: '0'

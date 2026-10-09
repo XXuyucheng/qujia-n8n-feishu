@@ -51,6 +51,7 @@ tables:
 | `quote_records` | 订单记录 | tbl91gZyDPCLhlva |
 | `invoice_applications` | 发票申请表 | tbl1qdQwcE3jEjlR |
 | `expense_records` | 业务支出表 | tbl8jKSb6kHvKlCL |
+| `flow_records` | 流水表 | tblqObCmK0l85u9s |
 
 新增表格时，可将飞书导出的 fields JSON 保存到 `files/`，再运行：
 

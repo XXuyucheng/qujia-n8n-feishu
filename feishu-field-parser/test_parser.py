@@ -14,6 +14,7 @@ from app import (
     format_object_as_text,
     format_user_names,
     normalize_date_value,
+    parse_field_value,
     parse_records,
     resolve_table_key,
 )
@@ -130,6 +131,39 @@ class ResolveTableKeyTests(unittest.TestCase):
     def test_resolve_by_table_id(self):
         self.assertEqual(resolve_table_key(table_id="tbl91gZyDPCLhlva"), "quote_records")
         self.assertEqual(resolve_table_key(table_id="tbl8jKSb6kHvKlCL"), "expense_records")
+        self.assertEqual(resolve_table_key(table_id="tblqObCmK0l85u9s"), "flow_records")
+
+    def test_formula_date_uses_nested_date_format(self):
+        meta = {
+            "type": 20,
+            "name": "归帐日期",
+            "property": {
+                "dataType": {
+                    "type": 5,
+                    "property": {"dateFormat": "yyyy/MM/dd"},
+                }
+            },
+        }
+        record = {"field_id": "fldXrYIJtj", "field_value": "1718006400000"}
+        self.assertEqual(parse_field_value(record, meta, []), "2024/06/10")
+
+    def test_flow_record_summary_fields(self):
+        records = [
+            {
+                "field_id": "fldpBp1FLE",
+                "field_value": '[{"sequence":"1","number":"LS26010001"}]',
+            },
+            {
+                "field_id": "fld5LxpC9X",
+                "field_value": '[{"type":"text","text":"测试备注"}]',
+            },
+            {"field_id": "fldphQMiHm", "field_value": "1718006400000"},
+        ]
+        result = parse_records("flow_records", records)
+        obj = result["object"]
+        self.assertEqual(obj["流水编号"], "LS26010001")
+        self.assertEqual(obj["网银收支备注"], "测试备注")
+        self.assertEqual(obj["记账日期"], "2024/06/10")
 
     def test_table_key_takes_priority(self):
         self.assertEqual(

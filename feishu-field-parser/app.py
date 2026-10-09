@@ -267,11 +267,22 @@ def coerce_readable_value(value: Any) -> Any:
     return value
 
 
+def field_options(meta: Dict[str, Any]) -> List[Dict[str, Any]]:
+    prop = meta.get("property") or {}
+    options = prop.get("options")
+    if isinstance(options, list) and options:
+        return [option for option in options if isinstance(option, dict)]
+    nested = ((prop.get("dataType") or {}).get("property") or {}).get("options")
+    if isinstance(nested, list):
+        return [option for option in nested if isinstance(option, dict)]
+    return []
+
+
 def map_option_value(value: Any, meta: Dict[str, Any]) -> Any:
     option_map = {
         str(option.get("id")): option.get("name")
-        for option in ((meta.get("property") or {}).get("options") or [])
-        if isinstance(option, dict) and option.get("id")
+        for option in field_options(meta)
+        if option.get("id")
     }
 
     def convert(one: Any) -> Any:
@@ -346,7 +357,12 @@ def default_date_format(meta: Dict[str, Any]) -> str:
 
 
 def resolve_date_format(meta: Dict[str, Any]) -> str:
-    fmt = str(((meta.get("property") or {}).get("dateFormat") or "")).strip()
+    prop = meta.get("property") or {}
+    fmt = str(prop.get("dateFormat") or "").strip()
+    if not fmt:
+        nested = (prop.get("dataType") or {}).get("property") or {}
+        if isinstance(nested, dict):
+            fmt = str(nested.get("dateFormat") or "").strip()
     return fmt or default_date_format(meta)
 
 
@@ -466,7 +482,9 @@ def is_text_field(meta: Dict[str, Any], bus_type: Optional[int]) -> bool:
 
 
 def is_date_field(meta: Dict[str, Any]) -> bool:
-    return int_or_none(meta.get("type")) in {5, 1001, 1002}
+    if int_or_none(meta.get("type")) in {5, 1001, 1002}:
+        return True
+    return formula_data_type(meta) == 5
 
 
 def is_user_field(meta: Dict[str, Any]) -> bool:
