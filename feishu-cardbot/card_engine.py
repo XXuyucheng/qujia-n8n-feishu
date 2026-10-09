@@ -69,6 +69,8 @@ def form_value_to_data(
     for key, cfg in (fields_cfg or {}).items():
         if (cfg or {}).get("type") == "attachment":
             continue
+        if str((cfg or {}).get("fill") or "") == "operator":
+            continue
         if key not in form_value:
             continue
         val = form_value[key]
@@ -253,7 +255,7 @@ class CardEngine:
                 )
             return (
                 callback_payload(
-                    card=build_confirm(self.config, merged),
+                    card=build_confirm(self.config, merged, open_id=self.open_id),
                     toast_text="请确认后写入",
                 ),
                 STATE_CONFIRMING,
@@ -330,7 +332,11 @@ class CardEngine:
                 STATE_COLLECTING,
                 payload,
             )
-        return build_confirm(self.config, data), STATE_CONFIRMING, payload
+        return (
+            build_confirm(self.config, data, open_id=self.open_id),
+            STATE_CONFIRMING,
+            payload,
+        )
 
     def _dedupe_search(
         self, *, app_token: str, table_id: str, data: Dict[str, Any]
@@ -406,13 +412,47 @@ class CardEngine:
             payload,
         )
 
+    def _operator_field_keys(self) -> List[str]:
+        fields_cfg = self.config.get("fields") or {}
+        return [
+            key
+            for key, cfg in fields_cfg.items()
+            if str((cfg or {}).get("fill") or "") == "operator"
+        ]
+
+    def _without_operator_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        skip = set(self._operator_field_keys())
+        return {key: val for key, val in data.items() if key not in skip}
+
+    def _stamp_operator(self, data: Dict[str, Any], open_id: str) -> Dict[str, Any]:
+        """录入人只取当前对话 open_id，覆盖表单或按钮快照里的值。"""
+        stamped = self._without_operator_fields(data)
+        for key in self._operator_field_keys():
+            stamped[key] = open_id
+        return stamped
+
     def _write(
         self, data: Dict[str, Any], payload: Dict[str, Any], *, overwrite: bool
     ) -> Tuple[Dict[str, Any], Optional[str], Optional[Dict[str, Any]]]:
         sticky = list(payload.get("active_rules") or [])
+        data = self._without_operator_fields(data)
         data, problems, sticky = normalize_data(
             self.config, data, sticky_rules=sticky
         )
+        open_id = str(self.open_id or "").strip()
+        if not open_id:
+            payload["data"] = data
+            payload["active_rules"] = sticky
+            return (
+                callback_payload(
+                    card=build_confirm(self.config, data),
+                    toast_text="无法识别录入人，请重新进入对话后再提交",
+                    toast_type="error",
+                ),
+                STATE_CONFIRMING,
+                payload,
+            )
+        data = self._stamp_operator(data, open_id)
         payload["data"] = data
         payload["active_rules"] = sticky
         blocking = collect_problems(self.config, data, problems)
@@ -441,7 +481,7 @@ class CardEngine:
                 payload["data"] = data
                 return (
                     callback_payload(
-                        card=build_confirm(self.config, data),
+                        card=build_confirm(self.config, data, open_id=self.open_id),
                         toast_text=str(exc.message),
                         toast_type="error",
                     ),
@@ -512,7 +552,7 @@ class CardEngine:
             payload["data"] = data
             return (
                 callback_payload(
-                    card=build_confirm(self.config, data),
+                    card=build_confirm(self.config, data, open_id=self.open_id),
                     toast_text="未配置飞书客户端",
                     toast_type="error",
                 ),
@@ -549,7 +589,7 @@ class CardEngine:
             payload["data"] = data
             return (
                 callback_payload(
-                    card=build_confirm(self.config, data),
+                    card=build_confirm(self.config, data, open_id=self.open_id),
                     toast_text=f"写入失败：{exc.message}",
                     toast_type="error",
                 ),

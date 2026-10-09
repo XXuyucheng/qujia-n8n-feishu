@@ -128,9 +128,13 @@ class CardBuildTests(unittest.TestCase):
         self.assertIn("submit_form", dumped)
         self.assertIn("cancel", dumped)
         self.assertNotIn("qrcode", options)
+        self.assertNotIn("录入人", dumped)
+        self.assertNotIn("recorder", dumped)
 
     def test_confirm_button_embeds_snapshot(self):
-        card = build_confirm(RUNTIME, COMPLETE_FORM)
+        card = build_confirm(
+            RUNTIME, {**COMPLETE_FORM, "recorder": "ou_spoof"}, open_id="ou_new"
+        )
         found = None
 
         def walk(node):
@@ -151,6 +155,9 @@ class CardBuildTests(unittest.TestCase):
         self.assertIsInstance(found, dict)
         self.assertEqual(found["supplier_name"], "德清茶歇A")
         self.assertEqual(found["account_no"], "6222 001")
+        self.assertNotIn("recorder", found)
+        self.assertIn("<at id=ou_new></at>", str(card))
+        self.assertNotIn("ou_spoof", str(card))
 
 
 class InjectSendCardTests(unittest.TestCase):
@@ -393,6 +400,8 @@ class DedupeWriteTests(unittest.TestCase):
         self.assertIsNone(over["state"])
         feishu.update_record.assert_called_once()
         self.assertEqual(feishu.update_record.call_args.kwargs["record_id"], "rec9")
+        updated = feishu.update_record.call_args.kwargs["fields"]
+        self.assertEqual(updated["录入人"], [{"id": open_id}])
 
     def test_create_when_no_dup(self):
         feishu = MagicMock()
@@ -421,6 +430,7 @@ class DedupeWriteTests(unittest.TestCase):
         self.assertTrue(fields)
         self.assertIn("供应商", fields)
         self.assertEqual(fields["供应商"], "德清茶歇A")
+        self.assertEqual(fields["录入人"], [{"id": "ou_new"}])
         self.assertIn("rec_new", str(done["callback"]))
 
     def test_confirm_without_session_does_not_write(self):
@@ -487,6 +497,7 @@ class DedupeWriteTests(unittest.TestCase):
             "account_name": "李四",
             "account_no": "6222001",
             "bank_name": "中国工商银行",
+            "recorder": "ou_spoof",
         }
         done = handle_card_action(
             runtime=RUNTIME,
@@ -507,7 +518,25 @@ class DedupeWriteTests(unittest.TestCase):
         self.assertTrue(fields)
         self.assertEqual(fields["供应商"], "快照供应商")
         self.assertEqual(fields["账号"], "6222001")
+        self.assertEqual(fields["录入人"], [{"id": "ou_snap"}])
         self.assertIn("rec_snap", str(done["callback"]))
+
+    def test_missing_open_id_does_not_write(self):
+        feishu = MagicMock()
+        feishu.search_records.return_value = []
+        engine = CardEngine(RUNTIME, feishu, open_id="", dry_run=False)
+        session = {
+            "state": STATE_CONFIRMING,
+            "payload": {"data": dict(COMPLETE_FORM), "active_rules": []},
+        }
+        callback, state, _payload = engine.handle_action(
+            action=ACTION_CONFIRM_WRITE,
+            session=session,
+        )
+        feishu.create_record.assert_not_called()
+        feishu.update_record.assert_not_called()
+        self.assertEqual(state, STATE_CONFIRMING)
+        self.assertIn("无法识别录入人", str(callback))
 
     def test_confirming_empty_data_does_not_create(self):
         feishu = MagicMock()

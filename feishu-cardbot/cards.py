@@ -148,14 +148,32 @@ def _select_element(key: str, cfg: Dict[str, Any], data: Dict[str, Any]) -> Dict
     return el
 
 
+def _is_operator_field(cfg: Optional[Dict[str, Any]]) -> bool:
+    return str((cfg or {}).get("fill") or "") == "operator"
+
+
 def form_field_keys(fields_cfg: Dict[str, Any]) -> List[str]:
-    """表单展示顺序：跳过附件字段。"""
+    """表单展示顺序：跳过附件和由系统填写的字段。"""
     keys: List[str] = []
     for key, cfg in (fields_cfg or {}).items():
         if (cfg or {}).get("type") == "attachment":
             continue
+        if _is_operator_field(cfg):
+            continue
         keys.append(key)
     return keys
+
+
+def data_without_operator_fields(
+    fields_cfg: Dict[str, Any], data: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """按钮快照不携带录入人，避免客户端改写。"""
+    out: Dict[str, Any] = {}
+    for key, val in (data or {}).items():
+        if _is_operator_field((fields_cfg or {}).get(key)):
+            continue
+        out[key] = val
+    return out
 
 
 def build_welcome(*, open_id: str = "") -> Dict[str, Any]:
@@ -240,14 +258,27 @@ def build_supplier_form(
     return wrap_card(header_title="供应商录入", template="blue", elements=elements)
 
 
-def build_confirm(runtime: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+def build_confirm(
+    runtime: Dict[str, Any], data: Dict[str, Any], *, open_id: str = ""
+) -> Dict[str, Any]:
     fields_cfg = runtime.get("fields") or {}
     lines = ["**请确认以下信息，确认后写入多维表：**"]
+    recorder_name = "录入人"
+    for cfg in fields_cfg.values():
+        if _is_operator_field(cfg):
+            recorder_name = str(cfg.get("name") or recorder_name)
+            break
+    mention_id = str(open_id or "").strip()
+    if mention_id:
+        lines.append(f"- {recorder_name}：<at id={mention_id}></at>")
     attach_key = str(runtime.get("attachment_field") or "qrcode")
+    visible = data_without_operator_fields(fields_cfg, data)
     for key, cfg in fields_cfg.items():
-        if key not in data or data[key] in (None, "", []):
+        if _is_operator_field(cfg):
             continue
-        val = format_value(data[key]) if key != attach_key else "[已附图片]"
+        if key not in visible or visible[key] in (None, "", []):
+            continue
+        val = format_value(visible[key]) if key != attach_key else "[已附图片]"
         lines.append(f"- {cfg.get('name', key)}：{val}")
     return wrap_card(
         header_title="确认写入",
@@ -267,7 +298,11 @@ def build_confirm(runtime: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, An
                                 text="确认写入",
                                 action="confirm_write",
                                 button_type="primary",
-                                extra={"data": field_snapshot(data)},
+                                extra={
+                                    "data": field_snapshot(
+                                        data_without_operator_fields(fields_cfg, data)
+                                    )
+                                },
                             )
                         ],
                     },
@@ -307,7 +342,10 @@ def build_overwrite(
     data: Optional[Dict[str, Any]] = None,
     existing_record_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    extra: Dict[str, Any] = {"data": field_snapshot(data)}
+    fields_cfg = runtime.get("fields") or {}
+    extra: Dict[str, Any] = {
+        "data": field_snapshot(data_without_operator_fields(fields_cfg, data))
+    }
     if existing_record_id:
         extra["existing_record_id"] = str(existing_record_id)
     return wrap_card(

@@ -197,6 +197,12 @@ fields:
     name: 支付宝/微信/二维码
     field_id: fldzomO4r4
     type: attachment
+  # 系统字段：写表时填当前对话用户，不出现在录入表单
+  recorder:
+    name: 录入人
+    field_id: fldOgL8kIy
+    type: user
+    fill: operator
 require_any_group:
 - - account_name
   - account_no

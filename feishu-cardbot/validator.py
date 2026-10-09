@@ -475,6 +475,10 @@ def build_bitable_fields(fields_cfg: Dict[str, Any], data: Dict[str, Any]) -> Di
                     result[name] = tokens
         elif ftype == "multi_select":
             result[name] = val if isinstance(val, list) else [val]
+        elif ftype == "user":
+            user_id = str(val).strip()
+            if user_id:
+                result[name] = [{"id": user_id}]
         else:
             result[name] = val
     return result
