@@ -35,13 +35,13 @@ DEFAULT_ITINERARY_COLUMNS: List[Dict[str, Any]] = [
 DEFAULT_SETTLEMENT_COLUMNS: List[Dict[str, Any]] = [
     {"field": "物品名称", "header": "物品名称", "width": 150},
     {"field": "内容", "header": "内容", "width": 200},
+    {"field": "结算信息", "header": "结算信息", "width": 250},
     {"field": "数量", "header": "数量", "width": 40},
     {"field": "单价", "header": "单价", "width": 50},
     {"field": "小计", "header": "小计", "width": 60},
     {"field": "预定状态", "header": "预定状态", "width": 70},
     {"field": "结算方式", "header": "结算方式", "width": 70},
     {"field": "联系人", "header": "联系人", "width": 70},
-    {"field": "预定信息", "header": "预定信息", "width": 250},
 ]
 
 
@@ -165,7 +165,7 @@ def resolve_settlement_rows(
                 "预定状态": item.get("预定状态") or "",
                 "结算方式": item.get("结算方式") or "",
                 "联系人": item.get("联系人") or "",
-                "预定信息": item.get("预定信息") or "",
+                "结算信息": item.get("结算信息") or "",
             }
         )
     return rows

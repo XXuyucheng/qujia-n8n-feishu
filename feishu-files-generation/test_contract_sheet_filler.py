@@ -328,36 +328,40 @@ class SettlementTests(unittest.TestCase):
                     "描述": "全程包车",
                     "数量": 1,
                     "单价": 4000,
-                    "预定信息": "预定文案",
+                    "结算信息": "结算文案",
                 }
             ]
         )
         self.assertEqual(rows[0]["物品名称"], "大巴车（38座）")
         self.assertEqual(rows[0]["内容"], "全程包车")
+        self.assertEqual(rows[0]["结算信息"], "结算文案")
         self.assertEqual(rows[0]["小计"], "")
 
         cols = normalize_columns(None, DEFAULT_SETTLEMENT_COLUMNS)
         matrix = build_settlement_matrix(cols, rows)
         self.assertEqual(matrix[0][0], "物品名称")
+        self.assertEqual(matrix[0][1], "内容")
+        self.assertEqual(matrix[0][2], "结算信息")
         self.assertEqual(matrix[1][0], "大巴车（38座）")
-        self.assertEqual(matrix[1][2], 1)
-        self.assertEqual(matrix[1][3], 4000)
-        self.assertEqual(matrix[1][4], "")  # 小计 empty
+        self.assertEqual(matrix[1][2], "结算文案")
+        self.assertEqual(matrix[1][3], 1)
+        self.assertEqual(matrix[1][4], 4000)
+        self.assertEqual(matrix[1][5], "")  # 小计 empty
 
     def test_formula_ranges(self):
         cols = normalize_columns(None, DEFAULT_SETTLEMENT_COLUMNS)
         ranges = build_settlement_formula_ranges("sid", cols, 3)
-        self.assertEqual(ranges[0]["range"], "sid!E2:E4")
+        self.assertEqual(ranges[0]["range"], "sid!F2:F4")
         self.assertEqual(
             ranges[0]["values"][0],
-            [{"type": "formula", "text": '=IF(OR(C2="",D2=""),"",C2*D2)'}],
+            [{"type": "formula", "text": '=IF(OR(D2="",E2=""),"",D2*E2)'}],
         )
         self.assertEqual(ranges[1]["range"], "sid!A5:A5")
         self.assertEqual(ranges[1]["values"][0], ["总价"])
-        self.assertEqual(ranges[2]["range"], "sid!E5:E5")
+        self.assertEqual(ranges[2]["range"], "sid!F5:F5")
         self.assertEqual(
             ranges[2]["values"][0],
-            [{"type": "formula", "text": "=SUM(E2:E4)"}],
+            [{"type": "formula", "text": "=SUM(F2:F4)"}],
         )
 
     def test_append_settlement_only(self):
@@ -374,13 +378,13 @@ class SettlementTests(unittest.TestCase):
                 "columns": [
                     {"field": "物品名称", "width": 150},
                     {"field": "内容", "width": 200},
+                    {"field": "结算信息", "width": 250},
                     {"field": "数量", "width": 40},
                     {"field": "单价", "width": 50},
                     {"field": "小计", "width": 60},
                     {"field": "预定状态", "width": 70},
                     {"field": "结算方式", "width": 70},
                     {"field": "联系人", "width": 70},
-                    {"field": "预定信息", "width": 250},
                 ],
             },
         }
@@ -402,7 +406,7 @@ class SettlementTests(unittest.TestCase):
         # values + formulas
         self.assertGreaterEqual(len(client.value_calls), 2)
         widths = [c["fixed_size"] for c in client.width_calls]
-        self.assertEqual(widths, [150, 200, 40, 50, 60, 70, 70, 70, 250])
+        self.assertEqual(widths, [150, 200, 250, 40, 50, 60, 70, 70, 70])
 
     def test_settlement_title_align_override(self):
         client = FakeClient()
