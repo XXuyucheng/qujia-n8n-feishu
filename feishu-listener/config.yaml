@@ -183,3 +183,18 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/flow-receipt-parse
     max_attempts: 3
     timeout_seconds: 10
+  # 流水表「支出凭证识别.输出结果」编辑后拆成三段写入。回写不改来源字段，不会再次命中。
+  # 须排在 flow-receipt-parse 之后：同一次编辑若两个输出字段都变了，收款路由先命中。
+  - name: flow-expense-parse
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tblqObCmK0l85u9s
+    actions: record_edited
+    field_conditions:
+      - field_id: fldQGhB7d7
+        exists: true
+    n8n_webhook_url: http://n8n:5678/webhook/flow-expense-parse
+    max_attempts: 3
+    timeout_seconds: 10
