@@ -31,7 +31,7 @@ feishu-bot/n8n/       # 查询 Agent / 知识库同步工作流模板（导入 n
 feishu-cardbot/       # 卡片交互机器人（供应商录入；默认不启 WS）
 ```
 
-工作流在 n8n 编辑器里维护（数据在 `n8n-data/`）；JSON 导出、设计稿等不入库。
+工作流跑在 ECS 上的 n8n。本地 `workflows/` 只放待导入 ECS 的 JSON，不在本地 n8n 里改。服务源码改完再 push。
 
 本地运行数据与其它不入库内容：
 
@@ -41,7 +41,7 @@ feishu-cardbot/       # 卡片交互机器人（供应商录入；默认不启 W
 | `n8n-data/` | n8n 数据库、凭据、日志、工作流 |
 | `files/` | n8n 共享挂载目录（runtime） |
 | `*/data/` | 各服务本地 SQLite 等 |
-| `workflows/`、`promet/` 等 | 本机导出/设计稿，见 `.gitignore` |
+| `workflows/`、`promet/` 等 | 待导入 ECS 的工作流 JSON 与设计稿，不入库，见 `.gitignore` |
 
 ## 本地启动
 

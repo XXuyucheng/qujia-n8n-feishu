@@ -22,6 +22,19 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice
     max_attempts: 3
     timeout_seconds: 10
+  - name: invoice-tax-status # 业务回票对税局：识别状态变为已识别
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tblNd9zgN7ALihwj
+    actions: record_edited
+    field_conditions:
+      - field_id: fldApH5hsr
+        equals: opt82mjoXE
+    n8n_webhook_url: http://n8n:5678/webhook/invoice-tax-status
+    max_attempts: 2
+    timeout_seconds: 25
   - name: online-quote-generation # 在线报价 Spreadsheet 生成（附件 / 按需双模式，n8n 内分支）
     enabled: true
     dispatch_enabled: true
@@ -156,3 +169,17 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/make-plan-blank
     max_attempts: 3
     timeout_seconds: 25
+  # 流水表「收款识别输出」编辑后拆成五个文本字段。回写不改来源字段，不会再次命中。
+  - name: flow-receipt-parse
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tblqObCmK0l85u9s
+    actions: record_edited
+    field_conditions:
+      - field_id: fldjoj1LvB
+        exists: true
+    n8n_webhook_url: http://n8n:5678/webhook/flow-receipt-parse
+    max_attempts: 3
+    timeout_seconds: 10
