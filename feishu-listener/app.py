@@ -1593,6 +1593,58 @@ def _collect_field_tokens_from_values(
                 tokens.append(value)
 
 
+def _is_json_container_token(token: str) -> bool:
+    """True when the token is a JSON object/array wrapper, not the cell text.
+
+    Feishu repeats the whole row in before_value and after_value, and the same
+    rich-text value can differ only by key order. Comparing those raw strings
+    would look like a change.
+    """
+    if not token or token[0] not in "[{":
+        return False
+    parsed = parse_json(token)
+    return isinstance(parsed, (dict, list)) and parsed not in ({}, [])
+
+
+def semantic_field_tokens(values: Any, field_id: str) -> List[str]:
+    """Leaf text of one field, ignoring JSON wrappers around it."""
+    if not isinstance(values, list):
+        return []
+    tokens: List[str] = []
+    for field in values:
+        if not isinstance(field, dict):
+            continue
+        if str(field.get("field_id") or "") != str(field_id):
+            continue
+        for token in extract_field_tokens(field.get("field_value")):
+            if _is_json_container_token(token) or token in tokens:
+                continue
+            tokens.append(token)
+    return tokens
+
+
+def field_value_changed(
+    event: Dict[str, Any],
+    field_id: str,
+    allowed_actions: Optional[Set[str]] = None,
+) -> bool:
+    raw_event = (event.get("raw") or {}).get("event") or {}
+    actions = raw_event.get("action_list") or []
+    if not isinstance(actions, list):
+        return False
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        action_name = action_dict_name(action)
+        if allowed_actions is not None and action_name not in allowed_actions:
+            continue
+        before = semantic_field_tokens(action.get("before_value"), field_id)
+        after = semantic_field_tokens(action.get("after_value"), field_id)
+        if before != after:
+            return True
+    return False
+
+
 def action_field_tokens(
     event: Dict[str, Any],
     field_id: str,
@@ -1626,6 +1678,13 @@ def field_condition_matches(
     field_id = condition.get("field_id")
     if not field_id:
         return False
+
+    if "changed" in condition:
+        changed = field_value_changed(event, str(field_id), allowed_actions)
+        if changed is not bool(condition.get("changed")):
+            return False
+        if not any(key in condition for key in ("exists", "equals", "value", "contains")):
+            return True
 
     actual_tokens = action_field_tokens(event, str(field_id), allowed_actions)
     if "exists" in condition:

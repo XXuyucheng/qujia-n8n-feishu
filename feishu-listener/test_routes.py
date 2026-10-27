@@ -9,6 +9,7 @@ from app import (
     _value_matches,
     actions_match,
     canonical_action_name,
+    find_route,
     normalize_event,
     route_matches,
 )
@@ -467,6 +468,90 @@ class ChatWsSwitchTests(unittest.TestCase):
 
         with patch.dict("os.environ", {"FEISHU_CHAT_WS_ENABLED": "false"}, clear=False):
             self.assertFalse(_chat_ws_enabled())
+
+
+def rich_text(text: str, type_first: bool = False) -> str:
+    item = {"type": "text", "text": text} if type_first else {"text": text, "type": "text"}
+    return json.dumps([item], ensure_ascii=False)
+
+
+def make_flow_edit_event(field_id: str, before_text: str, after_text: str, type_first_after: bool = False):
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": f"flow-changed-{field_id}",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tblqObCmK0l85u9s",
+            "action_list": [
+                {
+                    "action": "record_edited",
+                    "record_id": "reczz28SGwvcRTFw",
+                    "before_value": [
+                        {"field_id": field_id, "field_value": rich_text(before_text)},
+                        {"field_id": "flduJjUvXB", "field_value": rich_text("微信")},
+                    ],
+                    "after_value": [
+                        {
+                            "field_id": field_id,
+                            "field_value": rich_text(after_text, type_first=type_first_after),
+                        },
+                        {"field_id": "flduJjUvXB", "field_value": rich_text("杭州趣加旅行社服务有限公司")},
+                    ],
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
+
+
+class FieldChangedConditionTests(unittest.TestCase):
+    RECEIPT = "微信/2026-10-24 12:54:21/4000.00/扫码无账号/SK459472202082699261024535647128"
+
+    def route_for(self, field_id: str):
+        return base_route(
+            table_id="tblqObCmK0l85u9s",
+            actions="record_edited",
+            field_conditions=[{"field_id": field_id, "changed": True}],
+        )
+
+    def test_same_text_with_reordered_json_does_not_match(self):
+        event = make_flow_edit_event("fldjoj1LvB", self.RECEIPT, self.RECEIPT, type_first_after=True)
+        self.assertFalse(route_matches(self.route_for("fldjoj1LvB"), event))
+
+    def test_text_change_matches(self):
+        event = make_flow_edit_event("fldjoj1LvB", self.RECEIPT, self.RECEIPT + "/extra")
+        self.assertTrue(route_matches(self.route_for("fldjoj1LvB"), event))
+
+    def test_empty_to_text_matches(self):
+        event = make_flow_edit_event("fldQGhB7d7", "", "杭州趣加/2026-10-23/32500.00/李倩煜")
+        self.assertTrue(route_matches(self.route_for("fldQGhB7d7"), event))
+
+    def test_config_routes_compare_before_and_after(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        routes = {route["name"]: route for route in config["routes"]}
+        self.assertEqual(
+            routes["flow-receipt-parse"]["field_conditions"],
+            [{"field_id": "fldjoj1LvB", "changed": True}],
+        )
+        self.assertEqual(
+            routes["flow-expense-parse"]["field_conditions"],
+            [{"field_id": "fldQGhB7d7", "changed": True}],
+        )
+        receipt = make_flow_edit_event("fldjoj1LvB", self.RECEIPT, self.RECEIPT, type_first_after=True)
+        self.assertIsNone(find_route(receipt, config["routes"]))
+        changed = make_flow_edit_event("fldjoj1LvB", "", self.RECEIPT)
+        matched = find_route(changed, config["routes"])
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.get("name"), "flow-receipt-parse")
 
 
 if __name__ == "__main__":

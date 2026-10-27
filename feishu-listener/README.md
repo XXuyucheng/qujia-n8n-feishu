@@ -141,6 +141,8 @@ routes:
 | `contains: "关键词"` | 变更后的值里，任意 token 包含该子串 |
 | `exists: true` | 本次变更的 `after_value` 中出现该字段 |
 | `exists: false` | 本次变更的 `after_value` 中未出现该字段 |
+| `changed: true` | 该字段在 `before_value` 与 `after_value` 中的文本不同。飞书会把整行放进两边，不能用 `exists` 代替 |
+| `changed: false` | 该字段前后文本相同，或两边都没有 |
 
 **`exists` 与 `equals` 的区别**
 
@@ -200,8 +202,9 @@ routes:
 
 ### 重要说明（字段匹配语义）
 
-- **精确到「哪个字段出现在本次变更里、变更后的值是什么」**，不是「从旧值 A 变成新值 B 才触发」。
-- 新建/编辑默认只检查 `after_value`；删除行会额外检查 `before_value`。
+- **`equals` / `exists` 精确到「哪个字段出现在本次变更里、变更后的值是什么」**，不是「从旧值 A 变成新值 B 才触发」。飞书的 `after_value` 通常是整行快照，字段没改也会出现。
+- **`changed: true` 才比较前后文本**。比较的是拆出来的文字，不是原始 JSON 字符串，因此键顺序不同但文字相同不算变化。
+- 新建/编辑的 `equals` / `exists` 默认只检查 `after_value`；删除行会额外检查 `before_value`。
 - 配置了 `actions` 时，`field_conditions` 只在对应 action 项上评估（避免编辑事件误命中「新建行 + 字段」规则）。
 - 一次编辑可能同时带来多个字段出现在 `after_value`；只要配置的 `field_id` 的变更后值满足条件，就会命中。
 - 选项类字段的 `equals` 通常填**选项 id**（如 `optDK1JeDR`），不是显示名称；可在 Web UI 的事件详情 **Field Changes** 中查看。
