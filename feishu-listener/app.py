@@ -1171,7 +1171,7 @@ def extract_field_tokens(value: Any) -> List[str]:
                 walk(item)
             return
         if isinstance(cur, dict):
-            for key in ("id", "name", "enName", "en_name", "text", "value", "userId"):
+            for key in ("id", "name", "enName", "en_name", "text", "value", "userId", "file_token"):
                 if key in cur:
                     walk(cur.get(key))
             for key in ("data", "users"):

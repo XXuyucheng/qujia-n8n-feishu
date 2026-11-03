@@ -554,5 +554,103 @@ class FieldChangedConditionTests(unittest.TestCase):
         self.assertEqual(matched.get("name"), "flow-receipt-parse")
 
 
+def attachment_field_value(name: str, file_token: str, name_first: bool = True) -> str:
+    item = {"name": name, "file_token": file_token} if name_first else {"file_token": file_token, "name": name}
+    return json.dumps([item], ensure_ascii=False)
+
+
+def make_invoice_attachment_event(before: str, after: str, action: str = "record_edited"):
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "invoice-application-attachment",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tbl1qdQwcE3jEjlR",
+            "action_list": [
+                {
+                    "action": action,
+                    "record_id": "recInvoiceApplication001",
+                    "before_value": [
+                        {"field_id": "fldleNcqtc", "field_value": before},
+                    ],
+                    "after_value": [
+                        {"field_id": "fldleNcqtc", "field_value": after},
+                        {"field_id": "fldMkYRVjk", "field_value": "opt7COH8PP"},
+                    ],
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
+
+
+class InvoiceAttachmentChangedTests(unittest.TestCase):
+    def test_same_name_and_token_with_reordered_json_does_not_match(self):
+        before = attachment_field_value("a.pdf", "boxcnSame", name_first=True)
+        after = attachment_field_value("a.pdf", "boxcnSame", name_first=False)
+        event = make_invoice_attachment_event(before, after)
+        self.assertFalse(route_matches(
+            base_route(
+                table_id="tbl1qdQwcE3jEjlR",
+                actions=["record_added", "record_edited"],
+                field_conditions=[{"field_id": "fldleNcqtc", "changed": True}],
+            ),
+            event,
+        ))
+
+    def test_same_name_different_file_token_matches(self):
+        before = attachment_field_value("a.pdf", "boxcnOld")
+        after = attachment_field_value("a.pdf", "boxcnNew")
+        event = make_invoice_attachment_event(before, after)
+        self.assertTrue(route_matches(
+            base_route(
+                table_id="tbl1qdQwcE3jEjlR",
+                actions=["record_edited"],
+                field_conditions=[{"field_id": "fldleNcqtc", "changed": True}],
+            ),
+            event,
+        ))
+
+    def test_config_route_matches_new_file_and_ignores_status_only_edit(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        routes = {route["name"]: route for route in config["routes"]}
+        route = routes["invoice-application-recognize"]
+        self.assertEqual(route["table_id"], "tbl1qdQwcE3jEjlR")
+        self.assertEqual(route["field_conditions"], [{"field_id": "fldleNcqtc", "changed": True}])
+        self.assertEqual(route["n8n_webhook_url"], "http://n8n:5678/webhook/feishu/invoice-application")
+
+        uploaded = make_invoice_attachment_event(
+            attachment_field_value("a.pdf", "boxcnOld"),
+            attachment_field_value("a.pdf", "boxcnNew"),
+        )
+        matched = find_route(uploaded, config["routes"])
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.get("name"), "invoice-application-recognize")
+
+        unchanged = make_invoice_attachment_event(
+            attachment_field_value("a.pdf", "boxcnSame"),
+            attachment_field_value("a.pdf", "boxcnSame", name_first=False),
+        )
+        self.assertIsNone(find_route(unchanged, config["routes"]))
+
+        added = make_invoice_attachment_event(
+            "",
+            attachment_field_value("a.pdf", "boxcnNew"),
+            action="record_added",
+        )
+        added_match = find_route(added, config["routes"])
+        self.assertIsNotNone(added_match)
+        self.assertEqual(added_match.get("name"), "invoice-application-recognize")
+
+
 if __name__ == "__main__":
     unittest.main()
