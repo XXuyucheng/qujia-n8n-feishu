@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from sheet_filler import parse_sheet_token
 
+BLOCK_TEXT = 2
 BLOCK_HEADING2 = 4
 BLOCK_SHEET = 30
 # Feishu create-children Sheet block: row_size max is 9
@@ -340,6 +341,8 @@ def parse_style_cfg(raw: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         "header_bold": bool(raw.get("header_bold", True)),
         # H2 title alignment for appended sheets (left | center | right)
         "title_align": title_align_code(raw.get("title_align", "left"), "left"),
+        # heading2 keeps the old contracts; bold is a normal text block
+        "title_kind": "bold" if str(raw.get("title_kind") or "").strip().lower() == "bold" else "heading2",
     }
 
 
@@ -375,6 +378,32 @@ def _heading2_child(title: str, *, align: int = 1) -> Dict[str, Any]:
             "style": {"align": align_i},
         },
     }
+
+
+def _bold_text_child(title: str, *, align: int = 1) -> Dict[str, Any]:
+    """Create a normal text block with a bold run, not a heading."""
+    align_i = align if align in (1, 2, 3) else 1
+    return {
+        "block_type": BLOCK_TEXT,
+        "text": {
+            "elements": [
+                {
+                    "text_run": {
+                        "content": str(title or ""),
+                        "text_element_style": {"bold": True},
+                    }
+                }
+            ],
+            "style": {"align": align_i},
+        },
+    }
+
+
+def _title_child(title: str, style: Dict[str, Any]) -> Dict[str, Any]:
+    align = int(style.get("title_align") or 1)
+    if style.get("title_kind") == "bold":
+        return _bold_text_child(title, align=align)
+    return _heading2_child(title, align=align)
 
 
 def _sheet_child(row_size: int, column_size: int) -> Dict[str, Any]:
@@ -504,13 +533,12 @@ def fill_one_detail_sheet(
     create_rows = min(row_count, SHEET_CREATE_MAX_ROWS)
     create_cols = min(col_count, SHEET_CREATE_MAX_COLS)
 
-    title_align = int(style.get("title_align") or 1)
     create_data = client.create_block_children(
         token,
         document_id,
         document_id,
         [
-            _heading2_child(title, align=title_align),
+            _title_child(title, style),
             _sheet_child(create_rows, create_cols),
         ],
     )

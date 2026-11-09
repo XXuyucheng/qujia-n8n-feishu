@@ -290,6 +290,24 @@ class AppendSheetsTests(unittest.TestCase):
             # header bold second item
             self.assertTrue(call["data"][1]["style"]["font"]["bold"])
 
+    def test_bold_title_is_text_not_heading(self):
+        client = FakeClient()
+        cfg = {
+            "style": {"title_kind": "bold", "title_align": "left"},
+            "fee": {"title": "费用明细"},
+            "itinerary": {"title": "行程明细"},
+        }
+        append_contract_detail_sheets(client, "tok", "doc123", SAMPLE_FIELDS, cfg)
+        titles = []
+        for call in client.children_calls:
+            title = call["children"][0]
+            self.assertEqual(title["block_type"], 2)
+            self.assertNotIn("heading2", title)
+            run = title["text"]["elements"][0]["text_run"]
+            self.assertTrue(run["text_element_style"]["bold"])
+            titles.append(run["content"])
+        self.assertEqual(titles, ["费用明细", "行程明细"])
+
     def test_create_caps_at_9_then_inserts_extra_rows(self):
         client = FakeClient()
         many_fee = [

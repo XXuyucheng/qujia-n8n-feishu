@@ -34,63 +34,10 @@ output_folders:
 
 
 templates: #大括号内是占位符，生成合同时会被替换为n8n传入的实际值 大括号左边是模板中对应的占位符名称
-  趣加旅社:
-    template_token: "QyyUdUdXYoXzklxSUUGcanmenoh"
-    output_folder: 趣加旅社合同
-    document_name_pattern: "趣加旅行社活动合同{订单号}"
-    party_b_full_name: "杭州趣加旅行社服务有限公司"
-    # 文末追加费用明细 / 行程明细内嵌 Sheet（fields.费用明细 / fields.活动行程）
-    append_detail_sheets: true
-    detail_sheets:
-      style:
-        h_align: center          # sheet cells: left | center | right
-        v_align: center          # top | center | bottom
-        font_size: "10pt/1.5"
-        header_bold: true
-        title_align: left        # H2 title: left | center | right
-      fee:
-        title: 费用明细
-        columns:
-          - { field: 分类, header: 分类, width: 75 }
-          - { field: 名称, header: 名称, width: 120 }
-          - { field: 描述, header: 描述, width: 330 }
-          - { field: 数量, header: 数量, width: 50 }
-          - { field: 单价, header: 单价, width: 60 }
-          - { field: 总价, header: 总价, width: 70 }
-      itinerary:
-        title: 行程明细
-        columns:
-          - { field: 日期, header: 日期, width: 50 }
-          - { field: 时间, header: 时间, width: 100 }
-          - { field: 内容, header: 内容, width: 300 }
-    placeholders:
-      甲方名称: "{单位}"
-      甲方地址: "{甲方地址}"
-      甲方税号: "{甲方税号}"
-      乙方名称: "@party_b_full_name"
-      乙方地址: "浙江省杭州市滨江区长河街道长江路336号5幢506室"
-      乙方银行账号: "551357570300019"
-      乙方开户行: "台州银行杭州滨江支行"
-      乙方税号: "91330108MAK2NHH72X"
-      活动费用: "{合同价款}"
-      付款方式: "{付款方式}"
-      活动日期: "{执行日期}"
-      # 模板正文是 {{执行人数}}，不是 {{活动人数}}
-      执行人数: "{执行人数}"
-      活动名称: "{活动名称}"
-      签订日期: "@today"
-      # 旧合并正文占位强制清空；明细改由文末内嵌 Sheet 写入
-      活动行程与费用明细: ""
-      # 以下 key 当前模板正文中没有对应 {{}}；模板补上后即可生效
-      甲方联系人: "{联系人}"
-      甲方电话: "{联系方式}"
-      策划师: "{策划师}"
-      订单号: "{订单号}"
-
   趣加旅社示范文本:
     template_token: "SKAXdIyWUo0JeVxRa4mc8Apmnze"
     output_folder: 趣加旅社合同
-    document_name_pattern: "趣加旅行社活动合同{订单号}"
+    document_name_pattern: "趣加旅行社合同{订单号}"
     party_b_full_name: "杭州趣加旅行社服务有限公司"
     # 必填通过后，映射里的可空项若仍是空白，写成 /
     empty_optional: "/"
@@ -102,6 +49,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
         font_size: "10pt/1.5"
         header_bold: true
         title_align: left
+        title_kind: bold
       fee:
         title: 费用明细
         columns:
@@ -112,7 +60,7 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
           - { field: 单价, header: 单价, width: 60 }
           - { field: 总价, header: 总价, width: 70 }
       itinerary:
-        title: 活动行程
+        title: 行程明细
         columns:
           - { field: 日期, header: 日期, width: 50 }
           - { field: 时间, header: 时间, width: 100 }
@@ -368,7 +316,8 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
             col: C
 
 signing_unit_map:
-  杭州趣加旅行社服务有限公司: 趣加旅社
+  杭州趣加旅行社服务有限公司: 趣加旅社示范文本
+  趣加旅社: 趣加旅社示范文本
   杭州趣加文化创意有限公司: 趣加文化创意
   杭州趣顽企业管理咨询有限公司: 趣顽
   旅苑国际旅行社有限公司第一分公司: 旅苑

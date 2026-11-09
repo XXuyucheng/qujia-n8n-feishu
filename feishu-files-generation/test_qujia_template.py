@@ -34,17 +34,19 @@ COMPLETE_FIELDS = {
 class QujiaTemplateTests(unittest.TestCase):
     def test_new_template_shares_folder_and_keeps_old_token(self):
         new = resolve_template(signing_unit="趣加旅社示范文本", config=CONFIG)
-        old = resolve_template(signing_unit="趣加旅社", config=CONFIG)
+        alias = resolve_template(signing_unit="趣加旅社", config=CONFIG)
         self.assertEqual(new.template_token, "SKAXdIyWUo0JeVxRa4mc8Apmnze")
-        self.assertEqual(old.template_token, "QyyUdUdXYoXzklxSUUGcanmenoh")
+        self.assertEqual(alias.template_token, new.template_token)
         self.assertEqual(new.folder_token, "UtBAfoddYlwW3tdA6FTcwiImn1c")
-        self.assertEqual(new.folder_token, old.folder_token)
         self.assertEqual(new.empty_optional, "/")
-        self.assertEqual(old.empty_optional, "")
         self.assertTrue(new.append_detail_sheets)
-        self.assertEqual(new.detail_sheets["itinerary"]["title"], "活动行程")
+        self.assertEqual(new.detail_sheets["itinerary"]["title"], "行程明细")
+        self.assertEqual(new.detail_sheets["fee"]["title"], "费用明细")
+        self.assertEqual(new.detail_sheets["style"]["title_kind"], "bold")
         self.assertNotIn("乙方名称", new.required_placeholders)
         self.assertNotIn("途径地", new.required_placeholders)
+        with self.assertRaises(Exception):
+            resolve_template(signing_unit="不存在的旧趣加旅社模板", config=CONFIG)
 
     def test_empty_optional_becomes_slash_after_required_check(self):
         tpl = resolve_template(signing_unit="趣加旅社示范文本", config=CONFIG)
@@ -69,22 +71,6 @@ class QujiaTemplateTests(unittest.TestCase):
         self.assertIn("甲方名称", missing)
         self.assertEqual(values["甲方名称"], "")
         self.assertEqual(values["途径地"], "")
-
-    def test_old_template_keeps_blank_optional_values(self):
-        old = resolve_template(signing_unit="趣加旅社", config=CONFIG)
-        values, missing = finalize_placeholder_values(
-            old,
-            {
-                "单位": "杭州某某科技有限公司",
-                "甲方税号": "",
-                "合同价款": 80000,
-                "执行日期": "2026/06/25",
-            },
-            None,
-        )
-        self.assertEqual(missing, [])
-        self.assertEqual(values["甲方税号"], "")
-        self.assertEqual(values["乙方名称"], "杭州趣加旅行社服务有限公司")
 
 
 if __name__ == "__main__":
