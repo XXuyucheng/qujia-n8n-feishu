@@ -61,6 +61,8 @@ class ResolvedTemplate:
     # Alias key from output_folders when resolved via output_folder (may be empty)
     output_folder: str = ""
     explicit: bool = False
+    # After required placeholders pass, blank mapped keys become this text. Empty disables it.
+    empty_optional: str = ""
 
 
 def _expand_env(value: Any) -> Any:
@@ -355,6 +357,7 @@ def resolve_template(
         ),
         output_folder=folder_alias,
         explicit=False,
+        empty_optional=str(tpl.get("empty_optional") or "").strip(),
     )
 
 
@@ -479,6 +482,34 @@ def build_placeholder_values(
         values[str(key)] = str(value)
 
     return values
+
+
+def apply_empty_optional(tpl: ResolvedTemplate, values: Dict[str, str]) -> Dict[str, str]:
+    """Fill blank mapped placeholders that are not required. Required keys stay blank."""
+    replacement = str(tpl.empty_optional or "").strip()
+    if not replacement:
+        return values
+    required = {str(key) for key in tpl.required_placeholders}
+    filled = dict(values)
+    for key in tpl.placeholders:
+        if key in required:
+            continue
+        if not str(filled.get(key) or "").strip():
+            filled[key] = replacement
+    return filled
+
+
+def finalize_placeholder_values(
+    tpl: ResolvedTemplate,
+    fields: Optional[Dict[str, Any]] = None,
+    placeholders: Optional[Dict[str, str]] = None,
+) -> Tuple[Dict[str, str], List[str]]:
+    """Map values, then fill optional blanks only after required keys are present."""
+    values = build_placeholder_values(tpl, fields, placeholders)
+    missing = missing_required(values, tpl.required_placeholders)
+    if not missing:
+        values = apply_empty_optional(tpl, values)
+    return values, missing
 
 
 def format_document_name(

@@ -652,5 +652,85 @@ class InvoiceAttachmentChangedTests(unittest.TestCase):
         self.assertEqual(added_match.get("name"), "invoice-application-recognize")
 
 
+def make_contract_submit_event(signing_unit=None, status="opt3Grubt2"):
+    after = [{"field_id": "fldKtkrkNU", "field_value": status}]
+    if signing_unit is not None:
+        after.append({"field_id": "fldSaTx0aY", "field_value": signing_unit})
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "make-contract-qujia-route",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tbl821KbTBpjjyXI",
+            "action_list": [
+                {
+                    "action": "record_edited",
+                    "record_id": "recQujiaContract001",
+                    "after_value": after,
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
+
+
+class MakeContractQujiaRouteTests(unittest.TestCase):
+    def setUp(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        self.routes = config["routes"]
+        self.by_name = {route["name"]: route for route in self.routes}
+
+    def test_qujia_route_is_ahead_of_the_old_contract_route(self):
+        names = [route["name"] for route in self.routes]
+        self.assertLess(names.index("make-contract-qujia"), names.index("make-contract"))
+        route = self.by_name["make-contract-qujia"]
+        self.assertEqual(route["table_id"], "tbl821KbTBpjjyXI")
+        self.assertEqual(route["actions"], "record_edited")
+        self.assertEqual(
+            route["n8n_webhook_url"],
+            "http://n8n:5678/webhook/make-contract-qujia",
+        )
+        self.assertEqual(
+            route["field_conditions"],
+            [
+                {"field_id": "fldKtkrkNU", "equals": "opt3Grubt2"},
+                {"field_id": "fldSaTx0aY", "equals": ["趣加旅社", "optwCTYuUU"]},
+            ],
+        )
+        old = self.by_name["make-contract"]
+        self.assertEqual(old["n8n_webhook_url"], "http://n8n:5678/webhook/make-contract-online")
+        self.assertEqual(old["field_conditions"], [{"field_id": "fldKtkrkNU", "equals": "opt3Grubt2"}])
+
+    def test_qujia_signing_unit_matches_new_route_only(self):
+        by_name = find_route(make_contract_submit_event("趣加旅社"), self.routes)
+        by_option = find_route(make_contract_submit_event("optwCTYuUU"), self.routes)
+        self.assertEqual(by_name.get("name"), "make-contract-qujia")
+        self.assertEqual(by_option.get("name"), "make-contract-qujia")
+
+    def test_other_signing_unit_stays_on_old_route(self):
+        matched = find_route(make_contract_submit_event("趣加文化创意"), self.routes)
+        self.assertEqual(matched.get("name"), "make-contract")
+
+    def test_submit_without_signing_unit_stays_on_old_route(self):
+        matched = find_route(make_contract_submit_event(), self.routes)
+        self.assertEqual(matched.get("name"), "make-contract")
+
+    def test_qujia_route_ignores_other_contract_status(self):
+        matched = find_route(
+            make_contract_submit_event("趣加旅社", status="optQcGcwWB"),
+            self.routes,
+        )
+        self.assertIsNone(matched)
+
+
 if __name__ == "__main__":
     unittest.main()

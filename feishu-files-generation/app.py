@@ -14,12 +14,11 @@ from block_filler import build_update_requests, find_unresolved, probe_placehold
 from config_loader import (
     ConfigError,
     TemplateResolveError,
-    build_placeholder_values,
+    finalize_placeholder_values,
     format_document_name,
     list_output_folders,
     list_templates,
     load_config,
-    missing_required,
     parse_rate_limit,
     resolve_template,
 )
@@ -173,13 +172,12 @@ def _preview_payload(req: GenerateRequest) -> PreviewResponse:
             detail={"error_code": exc.error_code, "message": exc.message},
         ) from exc
 
-    values = build_placeholder_values(tpl, req.fields, req.placeholders)
+    values, missing = finalize_placeholder_values(tpl, req.fields, req.placeholders)
     doc_name = format_document_name(
         tpl.document_name_pattern,
         fields=req.fields,
         document_name=req.document_name,
     )
-    missing = missing_required(values, tpl.required_placeholders)
     warnings: List[str] = []
     if missing:
         warnings.append(f"缺少必填占位符: {', '.join(missing)}")
@@ -223,8 +221,7 @@ def api_generate(req: GenerateRequest) -> Any:
     except TemplateResolveError as exc:
         return _error_response(error_code=exc.error_code, message=exc.message)
 
-    values = build_placeholder_values(tpl, req.fields, req.placeholders)
-    still_missing = missing_required(values, tpl.required_placeholders)
+    values, still_missing = finalize_placeholder_values(tpl, req.fields, req.placeholders)
     if still_missing:
         return _error_response(
             error_code="MISSING_REQUIRED_PLACEHOLDER",

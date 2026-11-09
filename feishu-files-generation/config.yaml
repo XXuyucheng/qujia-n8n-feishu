@@ -87,6 +87,74 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       策划师: "{策划师}"
       订单号: "{订单号}"
 
+  趣加旅社示范文本:
+    template_token: "SKAXdIyWUo0JeVxRa4mc8Apmnze"
+    output_folder: 趣加旅社合同
+    document_name_pattern: "趣加旅行社活动合同{订单号}"
+    party_b_full_name: "杭州趣加旅行社服务有限公司"
+    # 必填通过后，映射里的可空项若仍是空白，写成 /
+    empty_optional: "/"
+    append_detail_sheets: true
+    detail_sheets:
+      style:
+        h_align: center
+        v_align: center
+        font_size: "10pt/1.5"
+        header_bold: true
+        title_align: left
+      fee:
+        title: 费用明细
+        columns:
+          - { field: 分类, header: 分类, width: 75 }
+          - { field: 名称, header: 名称, width: 120 }
+          - { field: 描述, header: 描述, width: 330 }
+          - { field: 数量, header: 数量, width: 50 }
+          - { field: 单价, header: 单价, width: 60 }
+          - { field: 总价, header: 总价, width: 70 }
+      itinerary:
+        title: 活动行程
+        columns:
+          - { field: 日期, header: 日期, width: 50 }
+          - { field: 时间, header: 时间, width: 100 }
+          - { field: 内容, header: 内容, width: 300 }
+    required_placeholders:
+      - 甲方名称
+      - 执行人数
+      - 订单号
+      - 活动日期
+      - 签订日期
+      - 经办人
+      - 经办人电话
+      - 活动名称
+      - 出发地
+      - 目的地
+      - 结束日期
+      - 旅游时间
+      - 人均费用
+      - 活动费用
+      - 付款方式
+    placeholders:
+      甲方名称: "{甲方名称}"
+      甲方税号: "{甲方税号}"
+      执行人数: "{执行人数}"
+      订单号: "{订单号}"
+      活动日期: "{执行日期}"
+      签订日期: "{签订日期}"
+      通讯地址: "{通讯地址}"
+      联系电话: "{联系方式}"
+      经办人: "{经办人}"
+      经办人电话: "{经办人电话}"
+      活动名称: "{活动名称}"
+      出发地: "{出发地}"
+      途径地: "{途径地}"
+      目的地: "{目的地}"
+      结束日期: "{结束日期}"
+      旅游时间: "{旅游时间}"
+      人均费用: "{人均费用}"
+      活动费用: "{活动费用}"
+      付款方式: "{付款方式}"
+      保险名称: "{保险名称}"
+
   趣伽团建:
     template_token: "P2nxdAGl2oOqpZxgpVQcyZOGnEg"
     output_folder: 趣伽团建合同

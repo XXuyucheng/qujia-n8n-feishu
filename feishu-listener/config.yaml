@@ -155,6 +155,26 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/Bill-Re-identification
     max_attempts: 3
     timeout_seconds: 10
+  # 趣加旅社单独合同。必须写在 make-contract 前面：监听器第一条命中即停止。
+  # 签约单位 fldSaTx0aY 是查找引用，事件里可能是「趣加旅社」或选项 id。
+  # 若一次真实「提交」的事件里没有该字段，本路由不会命中，记录仍进旧工作流。
+  - name: make-contract-qujia #趣加旅社合同占位符
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl821KbTBpjjyXI
+    actions: record_edited
+    field_conditions:
+      - field_id: fldKtkrkNU
+        equals: opt3Grubt2
+      - field_id: fldSaTx0aY
+        equals:
+          - 趣加旅社
+          - optwCTYuUU
+    n8n_webhook_url: http://n8n:5678/webhook/make-contract-qujia
+    max_attempts: 2
+    timeout_seconds: 60
   - name: make-contract #合同生成
     enabled: true
     dispatch_enabled: true
