@@ -732,5 +732,88 @@ class MakeContractQujiaRouteTests(unittest.TestCase):
         self.assertIsNone(matched)
 
 
+def make_customer_auto_event(
+    before_text,
+    after_text,
+    action="record_edited",
+    type_first_after=False,
+    extra_field=None,
+):
+    before = [{"field_id": "fld0NkQAqg", "field_value": rich_text(before_text)}]
+    after = [{"field_id": "fld0NkQAqg", "field_value": rich_text(after_text, type_first=type_first_after)}]
+    if extra_field:
+        field_id, before_extra, after_extra = extra_field
+        before.append({"field_id": field_id, "field_value": rich_text(before_extra)})
+        after.append({"field_id": field_id, "field_value": rich_text(after_extra)})
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "customer-auto-parse",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tblplCg1voA7Xjgi",
+            "action_list": [
+                {
+                    "action": action,
+                    "record_id": "recCustomer001",
+                    "before_value": before,
+                    "after_value": after,
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
+
+
+class CustomerAutoParseRouteTests(unittest.TestCase):
+    SAMPLE = "张三 13812345678 杭州某某科技有限公司"
+
+    def test_config_route_only_follows_auto_field_text(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        routes = {route["name"]: route for route in config["routes"]}
+        route = routes["customer-auto-parse"]
+        self.assertEqual(route["table_id"], "tblplCg1voA7Xjgi")
+        self.assertEqual(route["actions"], ["record_added", "record_edited"])
+        self.assertEqual(route["field_conditions"], [{"field_id": "fld0NkQAqg", "changed": True}])
+        self.assertEqual(route["n8n_webhook_url"], "http://n8n:5678/webhook/customer-auto-parse")
+        self.assertEqual(route["max_attempts"], 2)
+        self.assertEqual(route["timeout_seconds"], 30)
+
+        changed = make_customer_auto_event("", self.SAMPLE)
+        matched = find_route(changed, config["routes"])
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.get("name"), "customer-auto-parse")
+
+        added = make_customer_auto_event("", self.SAMPLE, action="record_added")
+        added_match = find_route(added, config["routes"])
+        self.assertEqual(added_match.get("name"), "customer-auto-parse")
+
+        same = make_customer_auto_event(self.SAMPLE, self.SAMPLE, type_first_after=True)
+        self.assertIsNone(find_route(same, config["routes"]))
+
+        other_field = make_customer_auto_event(
+            self.SAMPLE,
+            self.SAMPLE,
+            extra_field=("fld0lQryPN", "", "李四"),
+        )
+        self.assertIsNone(find_route(other_field, config["routes"]))
+
+        cleared = make_customer_auto_event(self.SAMPLE, "")
+        cleared_match = find_route(cleared, config["routes"])
+        self.assertEqual(cleared_match.get("name"), "customer-auto-parse")
+
+        deleted = make_customer_auto_event(self.SAMPLE, "", action="record_deleted")
+        deleted_match = find_route(deleted, config["routes"])
+        self.assertEqual(deleted_match.get("name"), "record_deleted_backup")
+
+
 if __name__ == "__main__":
     unittest.main()
