@@ -165,6 +165,25 @@ services:
       - LOG_LEVEL=INFO
     restart: unless-stopped
 
+  docx-generation:
+    build:
+      context: ./docx-generation
+      args:
+        BASE_IMAGE: ${DOCX_GENERATION_BASE_IMAGE:-docker.1ms.run/library/python:3.12-slim}
+    container_name: docx-generation
+    ports:
+      - "8060:8060"
+    volumes:
+      # 挂载源码，改 .py 后 restart 即可生效（依赖仍来自镜像）
+      - ./docx-generation:/app
+      - ./docx-generation/templates:/app/templates:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - DOCX_GENERATION_PORT=8060
+      - DOCX_TEMPLATES_DIR=/app/templates
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+
   nginx:
     profiles: ["prod"]
     image: ${NGINX_IMAGE:-docker.1ms.run/library/nginx:1.27-alpine}

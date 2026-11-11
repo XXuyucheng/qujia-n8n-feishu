@@ -28,7 +28,7 @@ defaults:
 output_folders:
   趣加旅社合同: "UtBAfoddYlwW3tdA6FTcwiImn1c"
   趣伽团建合同: "HgX1feLiBlORwvdslj3cJX9mnzf"
-  趣加文化创意合同: "HBW9fRr8plrVbsdQqeuc74kknxb"
+  富阳途臻合同: "HBW9fRr8plrVbsdQqeuc74kknxb"
   出团计划单: "IBTBfdFszl5hujdAp1GcrRAAnfc"
   在线报价: "CNxzf1R0FlwdY8dkQEhcH9Efnvg"
 
@@ -156,11 +156,11 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       策划师: "{策划师}"
       订单号: "{订单号}"
 
-  趣加文化创意:
+  富阳途臻:
     template_token: "PGLqd2qTto8SSKxu2IQcPDIBn8c"
-    output_folder: 趣加文化创意合同
-    document_name_pattern: "趣加文化创意活动合同{订单号}"
-    party_b_full_name: "杭州趣加文化创意有限公司"
+    output_folder: 富阳途臻合同
+    document_name_pattern: "富阳途臻活动合同{订单号}"
+    party_b_full_name: "杭州富阳途臻活动策划工作室（个体工商户）"
     # 文末追加费用明细 / 行程明细内嵌 Sheet（fields.费用明细 / fields.活动行程）
     append_detail_sheets: true
     detail_sheets:
@@ -191,9 +191,9 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
       甲方税号: "{甲方税号}"
       乙方名称: "@party_b_full_name"
       乙方地址: "浙江省杭州市滨江区长河街道长江路336号5幢503室"
-      乙方银行账号: "551167449900015"
-      乙方开户行: "台州银行杭州滨江支行"
-      乙方税号: "91330108MA2HYWPY6Y"
+      乙方银行账号: "551442201000012"
+      乙方开户行: "台州银行股份有限公司杭州滨江支行"
+      乙方税号: "92330183MAKL73FN2P"
       活动费用: "{合同价款}"
       付款方式: "{付款方式}"
       活动日期: "{执行日期}"
@@ -318,7 +318,9 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
 signing_unit_map:
   杭州趣加旅行社服务有限公司: 趣加旅社示范文本
   趣加旅社: 趣加旅社示范文本
-  杭州趣加文化创意有限公司: 趣加文化创意
+  富阳途臻: 富阳途臻
+  趣加文化创意: 富阳途臻
+  杭州趣加文化创意有限公司: 富阳途臻
   杭州趣顽企业管理咨询有限公司: 趣顽
   旅苑国际旅行社有限公司第一分公司: 旅苑
   杭州趣伽团建策划有限公司: 趣伽团建
