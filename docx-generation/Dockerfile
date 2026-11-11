@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-COPY app.py fill.py values.py test_*.py ./
+COPY app.py fill.py tables.py values.py test_*.py ./
 RUN mkdir -p /app/templates
 
 EXPOSE 8060
