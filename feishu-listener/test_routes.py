@@ -691,7 +691,16 @@ class MakeContractQujiaRouteTests(unittest.TestCase):
 
     def test_qujia_route_is_ahead_of_the_old_contract_route(self):
         names = [route["name"] for route in self.routes]
+        self.assertLess(names.index("make-contract-info"), names.index("make-contract-qujia"))
         self.assertLess(names.index("make-contract-qujia"), names.index("make-contract"))
+        info = self.by_name["make-contract-info"]
+        self.assertEqual(info["table_id"], "tbl821KbTBpjjyXI")
+        self.assertEqual(info["actions"], "record_edited")
+        self.assertEqual(info["n8n_webhook_url"], "http://n8n:5678/webhook/make-contract-info")
+        self.assertEqual(
+            info["field_conditions"],
+            [{"field_id": "fldKtkrkNU", "equals": ["生成word", "optHUwrws1"]}],
+        )
         route = self.by_name["make-contract-qujia"]
         self.assertEqual(route["table_id"], "tbl821KbTBpjjyXI")
         self.assertEqual(route["actions"], "record_edited")
@@ -709,6 +718,12 @@ class MakeContractQujiaRouteTests(unittest.TestCase):
         old = self.by_name["make-contract"]
         self.assertEqual(old["n8n_webhook_url"], "http://n8n:5678/webhook/make-contract-online")
         self.assertEqual(old["field_conditions"], [{"field_id": "fldKtkrkNU", "equals": "opt3Grubt2"}])
+
+    def test_generate_word_uses_the_info_workflow(self):
+        by_name = find_route(make_contract_submit_event("富阳途臻", status="生成word"), self.routes)
+        by_option = find_route(make_contract_submit_event("趣伽团建", status="optHUwrws1"), self.routes)
+        self.assertEqual(by_name.get("name"), "make-contract-info")
+        self.assertEqual(by_option.get("name"), "make-contract-info")
 
     def test_qujia_signing_unit_matches_new_route_only(self):
         by_name = find_route(make_contract_submit_event("趣加旅社"), self.routes)
