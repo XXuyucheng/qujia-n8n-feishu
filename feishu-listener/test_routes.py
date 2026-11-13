@@ -691,6 +691,7 @@ class MakeContractQujiaRouteTests(unittest.TestCase):
 
     def test_qujia_route_is_ahead_of_the_old_contract_route(self):
         names = [route["name"] for route in self.routes]
+        self.assertLess(names.index("extract-exec-info"), names.index("make-contract-info"))
         self.assertLess(names.index("make-contract-info"), names.index("make-contract-qujia"))
         self.assertLess(names.index("make-contract-qujia"), names.index("make-contract"))
         info = self.by_name["make-contract-info"]
@@ -745,6 +746,46 @@ class MakeContractQujiaRouteTests(unittest.TestCase):
             self.routes,
         )
         self.assertIsNone(matched)
+
+    def test_departure_extract_uses_its_own_route(self):
+        route = self.by_name["extract-exec-info"]
+        self.assertEqual(route["table_id"], "tbl821KbTBpjjyXI")
+        self.assertEqual(route["actions"], "record_edited")
+        self.assertEqual(route["n8n_webhook_url"], "http://n8n:5678/webhook/extract-exec-info")
+        self.assertEqual(
+            route["field_conditions"],
+            [{"field_id": "fldBNzUzkq", "equals": ["提取执行信息", "optIZeXlrH"]}],
+        )
+        by_name = find_route(make_departure_extract_event("提取执行信息"), self.routes)
+        by_option = find_route(make_departure_extract_event("optIZeXlrH"), self.routes)
+        self.assertEqual(by_name.get("name"), "extract-exec-info")
+        self.assertEqual(by_option.get("name"), "extract-exec-info")
+
+
+def make_departure_extract_event(value="提取执行信息"):
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "extract-exec-info-route",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tbl821KbTBpjjyXI",
+            "action_list": [
+                {
+                    "action": "record_edited",
+                    "record_id": "recExtract001",
+                    "after_value": [{"field_id": "fldBNzUzkq", "field_value": value}],
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
 
 
 def make_customer_auto_event(

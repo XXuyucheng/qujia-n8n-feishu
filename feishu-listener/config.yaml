@@ -155,6 +155,22 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/Bill-Re-identification
     max_attempts: 3
     timeout_seconds: 10
+  # 出发地变为「提取执行信息」时，从在线报价表回写执行字段。写在合同路由前面，同一次编辑里合同生成也变化时先走这条。
+  - name: extract-exec-info #合同字段回写
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl821KbTBpjjyXI
+    actions: record_edited
+    field_conditions:
+      - field_id: fldBNzUzkq
+        equals:
+          - 提取执行信息
+          - optIZeXlrH
+    n8n_webhook_url: http://n8n:5678/webhook/extract-exec-info
+    max_attempts: 2
+    timeout_seconds: 60
   # 合同信息整理。生成 Word 的入口，必须写在「提交」两条合同路由前面。
   # 合同生成 fldKtkrkNU 选中「生成word」（optHUwrws1）即触发，三个签约主体都走这里。
   - name: make-contract-info #合同信息整理
