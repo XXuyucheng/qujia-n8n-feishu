@@ -52,11 +52,15 @@ from spreadsheet_filler import (
     build_online_quote_detail_ranges,
     build_placeholder_value_ranges,
     detail_start_row_after_anchor_delete,
+    find_blank_template_sheet,
     find_total_label_row,
     insert_row_spec,
     itinerary_insert_before_row,
+    pick_quote_sheet,
+    quote_sheet_title,
     normalize_itinerary_rows,
     normalize_quote_sheet_rows,
+    sheet_id_of,
 )
 
 CONFIG_PATH = Path(os.getenv("FEISHU_FILES_GENERATION_CONFIG_PATH", "/app/config.yaml"))
@@ -265,15 +269,54 @@ def api_generate(req: GenerateRequest) -> Any:
         client.close()
 
 
-def _generate_spreadsheet(
+def _open_quote_spreadsheet(
     client: FeishuClient,
     token: str,
     tpl: Any,
     req: GenerateRequest,
-    values: Dict[str, str],
     doc_name: str,
 ) -> Any:
-    """Copy standalone spreadsheet template, replace {{}} headers, insert+write detail."""
+    """Open the worksheet to fill.
+
+    With ``spreadsheet_token``, copy 「空白模板」 inside that file.
+    The new sheet is titled with 活动名称 (报价N when that name is empty).
+    Otherwise copy the whole template file and fill the first non-blank sheet.
+    Returns a dict, or an error ``JSONResponse``.
+    """
+    append_token = str(req.spreadsheet_token or "").strip()
+    if append_token:
+        sheets = client.list_spreadsheet_sheets(token, append_token)
+        blank = find_blank_template_sheet(sheets)
+        blank_id = sheet_id_of(blank)
+        if not blank_id:
+            # 200 so the workflow writeback can store this code on 报价生成状态.
+            return _error_response(
+                error_code="缺少空白模板",
+                message="电子表格中没有标题为「空白模板」的工作表，无法追加报价",
+                status_code=200,
+                details={"spreadsheet_token": append_token},
+            )
+        activity = ""
+        if isinstance(req.fields, dict):
+            activity = str(req.fields.get("活动名称") or "")
+        title = quote_sheet_title(activity, sheets)
+        props = client.copy_sheet(token, append_token, blank_id, title)
+        sheet_id = str(props.get("sheetId") or "").strip()
+        if not sheet_id:
+            return _error_response(
+                error_code="SHEET_NOT_FOUND",
+                message="复制空白模板后未返回 sheetId",
+                status_code=502,
+                details={"spreadsheet_token": append_token},
+            )
+        return {
+            "spreadsheet_token": append_token,
+            "document_url": f"https://feishu.cn/sheets/{append_token}",
+            "sheet_id": sheet_id,
+            "document_name": str(props.get("title") or title),
+            "sheets_appended": 1,
+        }
+
     copied = client.copy_file(
         token,
         template_token=tpl.template_token,
@@ -285,27 +328,42 @@ def _generate_spreadsheet(
     document_url = str(
         copied.get("url") or f"https://feishu.cn/sheets/{spreadsheet_token}"
     )
-
     sheets = client.list_spreadsheet_sheets(token, spreadsheet_token)
-    if not sheets:
-        return _error_response(
-            error_code="SHEET_NOT_FOUND",
-            message="复制后的电子表格中未找到 worksheet",
-            details={"template_key": tpl.key},
-        )
-    first = sheets[0]
-    sheet_id = str(
-        first.get("sheet_id")
-        or (first.get("sheet") or {}).get("sheet_id")
-        or first.get("sheetId")
-        or ""
-    )
+    target = pick_quote_sheet(sheets)
+    sheet_id = sheet_id_of(target)
     if not sheet_id:
         return _error_response(
             error_code="SHEET_NOT_FOUND",
-            message="无法解析 worksheet sheet_id",
-            details={"sheets": sheets, "template_key": tpl.key},
+            message="复制后的电子表格中未找到可写入的 worksheet",
+            details={"template_key": tpl.key, "sheets": sheets},
         )
+    return {
+        "spreadsheet_token": spreadsheet_token,
+        "document_url": document_url,
+        "sheet_id": sheet_id,
+        "document_name": doc_name,
+        "sheets_appended": 0,
+    }
+
+
+def _generate_spreadsheet(
+    client: FeishuClient,
+    token: str,
+    tpl: Any,
+    req: GenerateRequest,
+    values: Dict[str, str],
+    doc_name: str,
+) -> Any:
+    """Fill an online-quote spreadsheet: new file, or a new sheet on an existing file."""
+    file_name = doc_name
+    opened = _open_quote_spreadsheet(client, token, tpl, req, doc_name)
+    if isinstance(opened, JSONResponse):
+        return opened
+    spreadsheet_token = opened["spreadsheet_token"]
+    document_url = opened["document_url"]
+    sheet_id = opened["sheet_id"]
+    doc_name = opened["document_name"]
+    sheets_appended = opened["sheets_appended"]
 
     warnings: List[str] = []
     replaced_cells = 0
@@ -469,6 +527,13 @@ def _generate_spreadsheet(
             client.values_batch_update(token, spreadsheet_token, itin_ranges)
             itinerary_rows_written = len(itinerary_rows)
 
+    if sheets_appended and file_name:
+        try:
+            client.rename_file(token, spreadsheet_token, file_name)
+            doc_name = file_name
+        except FeishuAPIError as exc:
+            warnings.append(f"电子表格重命名失败: {exc.message}")
+
     return GenerateResponse(
         success=True,
         document_id=spreadsheet_token,
@@ -481,6 +546,7 @@ def _generate_spreadsheet(
         replaced_blocks=replaced_cells,
         sheet_rows_written=sheet_rows_written,
         itinerary_rows_written=itinerary_rows_written,
+        sheets_appended=sheets_appended,
         unresolved_placeholders=unresolved_ph,
         warnings=warnings,
         placeholders=values,

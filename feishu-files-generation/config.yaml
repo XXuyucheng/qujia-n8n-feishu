@@ -256,6 +256,8 @@ templates: #大括号内是占位符，生成合同时会被替换为n8n传入�
 
   在线报价:
     type: spreadsheet
+    # 源模板需另有一张标题为「空白模板」的工作表（版式与报价表相同）。
+    # 首次复制整文件会把它带进每个报价文件；多次生成时在该文件内 copySheet。
     template_token: "DHnusjhhShGzT2t5HCzcqsnHncg"
     output_folder: 在线报价
     document_name_pattern: "{活动名称}-{订单号}"

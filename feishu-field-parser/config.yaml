@@ -281,6 +281,9 @@ tables:
         # - id: optXXXX
         #   name: 提交生成
         #   color: 4
+        - id: optBRN6r2x
+          name: 多次生成
+          color: 5
     - id: fldFdgJS0a
       type: 15
       name: 在线报价

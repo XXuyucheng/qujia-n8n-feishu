@@ -7,10 +7,86 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from sheet_filler import SheetConfigError, build_sheet_value_ranges
 
+BLANK_SHEET_TITLE = "空白模板"
+SHEET_TITLE_MAX = 100
+_INVALID_SHEET_TITLE = re.compile(r"[\\/?*\[\]:]")
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
 DEFAULT_LINE_TOTAL = '=IF(OR(D{row}="",E{row}=""),"",D{row}*E{row})'
 DEFAULT_PROFIT_SUM = "=SUM(I{start}:I{end})"
 DEFAULT_TOTAL_I = "=D{row}-H{row}"
+
+
+def sheet_title(sheet: Dict[str, Any]) -> str:
+    nested = sheet.get("sheet") if isinstance(sheet.get("sheet"), dict) else {}
+    return str(sheet.get("title") or nested.get("title") or "").strip()
+
+
+def sheet_id_of(sheet: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(sheet, dict):
+        return ""
+    nested = sheet.get("sheet") if isinstance(sheet.get("sheet"), dict) else {}
+    return str(
+        sheet.get("sheet_id")
+        or sheet.get("sheetId")
+        or nested.get("sheet_id")
+        or nested.get("sheetId")
+        or ""
+    ).strip()
+
+
+def find_blank_template_sheet(
+    sheets: Sequence[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Worksheet titled exactly 「空白模板」, used as the copy source for extra quotes."""
+    for sheet in sheets:
+        if sheet_title(sheet) == BLANK_SHEET_TITLE and sheet_id_of(sheet):
+            return sheet
+    return None
+
+
+def next_quote_sheet_title(sheets: Sequence[Dict[str, Any]]) -> str:
+    """Title for the next quote sheet: 报价{non-blank count + 1}, skipping collisions."""
+    titles = {sheet_title(sheet) for sheet in sheets if sheet_title(sheet)}
+    n = sum(1 for sheet in sheets if sheet_title(sheet) != BLANK_SHEET_TITLE) + 1
+    title = f"报价{n}"
+    while title in titles:
+        n += 1
+        title = f"报价{n}"
+    return title
+
+
+def quote_sheet_title(activity: str, sheets: Sequence[Dict[str, Any]]) -> str:
+    """Sheet title for an extra quote: the activity name, or 报价N when it is empty.
+
+    Feishu rejects ``\\ / ? * [ ] :`` in a sheet title. A name already used in the
+    file becomes ``活动名称（2）``, then ``（3）``.
+    """
+    titles = {sheet_title(sheet) for sheet in sheets if sheet_title(sheet)}
+    raw = _INVALID_SHEET_TITLE.sub("", str(activity or "")).strip()
+    raw = raw[:SHEET_TITLE_MAX].strip()
+    if not raw:
+        return next_quote_sheet_title(sheets)
+    if raw not in titles:
+        return raw
+    n = 2
+    while True:
+        suffix = f"（{n}）"
+        base = raw[: SHEET_TITLE_MAX - len(suffix)].rstrip()
+        candidate = f"{base}{suffix}"
+        if candidate not in titles:
+            return candidate
+        n += 1
+
+
+def pick_quote_sheet(sheets: Sequence[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """First worksheet to fill on a new file. Never the blank copy-source sheet."""
+    for sheet in sheets:
+        if sheet_id_of(sheet) and sheet_title(sheet) != BLANK_SHEET_TITLE:
+            return sheet
+    for sheet in sheets:
+        if sheet_id_of(sheet):
+            return sheet
+    return None
 
 
 def _formula_cell(text: str) -> Dict[str, str]:

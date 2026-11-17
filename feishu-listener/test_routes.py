@@ -871,5 +871,48 @@ class CustomerAutoParseRouteTests(unittest.TestCase):
         self.assertEqual(deleted_match.get("name"), "record_deleted_backup")
 
 
+class OnlineQuoteMultiRouteTests(unittest.TestCase):
+    def setUp(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        self.routes = config["routes"]
+        self.by_name = {route["name"]: route for route in self.routes}
+
+    def _event(self, field_value: str):
+        raw = deepcopy(QUOTE_EDITED_RAW)
+        raw["event"]["action_list"][0]["after_value"] = [
+            {"field_id": "fldGQVeaKb", "field_value": field_value},
+        ]
+        return normalize_event(raw)
+
+    def test_route_points_at_quote_multi_webhook(self):
+        names = [route["name"] for route in self.routes]
+        self.assertLess(names.index("online-quote-generation"), names.index("online-quote-multi"))
+        self.assertLess(names.index("online-quote-multi"), names.index("order-deal-status-date"))
+        route = self.by_name["online-quote-multi"]
+        self.assertEqual(route["actions"], "record_edited")
+        self.assertEqual(
+            route["n8n_webhook_url"],
+            "http://n8n:5678/webhook/feishu/quote-multi",
+        )
+        self.assertEqual(
+            route["field_conditions"],
+            [{"field_id": "fldGQVeaKb", "equals": ["多次生成", "optBRN6r2x"]}],
+        )
+        self.assertEqual(
+            self.by_name["online-quote-generation"]["n8n_webhook_url"],
+            "http://n8n:5678/webhook/feishu/quote-test",
+        )
+
+    def test_multi_status_does_not_steal_existing_quote_route(self):
+        pending = find_route(self._event("optDK1JeDR"), self.routes)
+        self.assertEqual(pending.get("name"), "online-quote-generation")
+        by_name = find_route(self._event("多次生成"), self.routes)
+        self.assertEqual(by_name.get("name"), "online-quote-multi")
+        by_id = find_route(self._event("optBRN6r2x"), self.routes)
+        self.assertEqual(by_id.get("name"), "online-quote-multi")
+
+
 if __name__ == "__main__":
     unittest.main()

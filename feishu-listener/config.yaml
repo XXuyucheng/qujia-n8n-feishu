@@ -66,6 +66,23 @@ routes:
     # 生成含下载/插行/可选 AI，常 >10s；超时重试会导致同一提交触发多次工作流
     max_attempts: 2
     timeout_seconds: 180
+  # 已有在线报价后追加工作表。须在 order-deal 之前（同表先匹配先停）。
+  # after_value 是选项 id optBRN6r2x；名称一并保留，便于身份值里带显示名时也能命中。
+  - name: online-quote-multi
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl91gZyDPCLhlva
+    actions: record_edited
+    field_conditions:
+      - field_id: fldGQVeaKb
+        equals:
+          - 多次生成
+          - optBRN6r2x
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/quote-multi
+    max_attempts: 2
+    timeout_seconds: 180
   # 订单成交状态变更 → 写/清空成交日期（须在 online-quote 之后：同表先匹配先停）
   # 含新建即为已成交；n8n 比较 before/after（新建 before 为空），仅状态变化才回写
   - name: order-deal-status-date

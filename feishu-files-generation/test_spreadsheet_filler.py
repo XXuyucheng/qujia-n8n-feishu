@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from spreadsheet_filler import (
+    BLANK_SHEET_TITLE,
     anchor_rows_to_delete,
     build_detail_formula_ranges,
     build_final_total_formula_ranges,
@@ -12,8 +13,12 @@ from spreadsheet_filler import (
     build_online_quote_detail_ranges,
     detail_start_row,
     detail_start_row_after_anchor_delete,
+    find_blank_template_sheet,
     itinerary_insert_before_row,
+    next_quote_sheet_title,
     normalize_itinerary_rows,
+    pick_quote_sheet,
+    quote_sheet_title,
 )
 
 
@@ -209,6 +214,72 @@ class ItineraryInsertTests(unittest.TestCase):
         self.assertTrue(ranges)
         joined = " ".join(r["range"] for r in ranges)
         self.assertIn("A16:C17", joined)
+
+
+class AppendSheetTitleTests(unittest.TestCase):
+    def test_blank_title_constant(self):
+        self.assertEqual(BLANK_SHEET_TITLE, "空白模板")
+
+    def test_next_title_is_quote_plus_non_blank_count(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "报价"},
+            {"sheet_id": "s0", "title": "空白模板"},
+        ]
+        self.assertEqual(next_quote_sheet_title(sheets), "报价2")
+        sheets.append({"sheet_id": "s2", "title": "报价2"})
+        self.assertEqual(next_quote_sheet_title(sheets), "报价3")
+
+    def test_title_collision_bumps(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "报价2"},
+            {"sheet_id": "s0", "title": "空白模板"},
+        ]
+        self.assertEqual(next_quote_sheet_title(sheets), "报价3")
+
+    def test_find_blank_requires_exact_title_and_id(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "报价"},
+            {"title": "空白模板"},
+            {"sheet_id": "s0", "title": "空白模板备份"},
+        ]
+        self.assertIsNone(find_blank_template_sheet(sheets))
+        sheets.append({"sheetId": "blank", "title": "空白模板"})
+        found = find_blank_template_sheet(sheets)
+        self.assertEqual(found["sheetId"], "blank")
+
+    def test_pick_quote_sheet_skips_blank_even_when_first(self):
+        sheets = [
+            {"sheet_id": "blank", "title": "空白模板"},
+            {"sheet_id": "quote", "title": "Sheet1"},
+        ]
+        self.assertEqual(pick_quote_sheet(sheets)["sheet_id"], "quote")
+
+    def test_activity_name_is_the_new_sheet_title(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "首版报价"},
+            {"sheet_id": "s0", "title": "空白模板"},
+        ]
+        self.assertEqual(quote_sheet_title("西湖团建", sheets), "西湖团建")
+
+    def test_duplicate_activity_name_adds_suffix(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "西湖团建"},
+            {"sheet_id": "s2", "title": "西湖团建（2）"},
+            {"sheet_id": "s0", "title": "空白模板"},
+        ]
+        self.assertEqual(quote_sheet_title("西湖团建", sheets), "西湖团建（3）")
+
+    def test_empty_activity_name_falls_back_to_quote_n(self):
+        sheets = [
+            {"sheet_id": "s1", "title": "报价"},
+            {"sheet_id": "s0", "title": "空白模板"},
+        ]
+        self.assertEqual(quote_sheet_title("  ", sheets), "报价2")
+        self.assertEqual(quote_sheet_title("?/:*", sheets), "报价2")
+
+    def test_sheet_title_strips_invalid_characters(self):
+        sheets = [{"sheet_id": "s0", "title": "空白模板"}]
+        self.assertEqual(quote_sheet_title("西湖/团建:一日", sheets), "西湖团建一日")
 
 
 if __name__ == "__main__":

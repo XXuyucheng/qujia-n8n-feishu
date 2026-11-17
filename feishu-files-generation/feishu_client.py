@@ -567,6 +567,84 @@ class FeishuClient:
         sheets = (data.get("data") or {}).get("sheets") or []
         return [s for s in sheets if isinstance(s, dict)]
 
+    def copy_sheet(
+        self,
+        token: str,
+        spreadsheet_token: str,
+        source_sheet_id: str,
+        title: str,
+    ) -> Dict[str, Any]:
+        """Copy a worksheet inside the same spreadsheet.
+
+        Feishu copySheet cannot cross files. Returns the new sheet properties
+        (``sheetId``, ``title``).
+        """
+        url = (
+            f"{FEISHU_BASE}/sheets/v2/spreadsheets/"
+            f"{spreadsheet_token}/sheets_batch_update"
+        )
+        body = {
+            "requests": [
+                {
+                    "copySheet": {
+                        "source": {"sheetId": source_sheet_id},
+                        "destination": {"title": title},
+                    }
+                }
+            ]
+        }
+        self._throttle("write")
+        resp = self._client.post(url, headers=self._headers(token), json=body)
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.post(url, headers=self._headers(token), json=body)
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="copy_sheet")
+        replies = (data.get("data") or {}).get("replies") or []
+        reply = replies[0] if replies else {}
+        copied = reply.get("copySheet") if isinstance(reply, dict) else None
+        copied = copied if isinstance(copied, dict) else reply
+        props = copied.get("properties") if isinstance(copied, dict) else None
+        if not isinstance(props, dict):
+            props = copied if isinstance(copied, dict) else None
+        if not isinstance(props, dict) or not props.get("sheetId"):
+            raise FeishuAPIError(
+                "copy_sheet response missing sheetId",
+                details={"response": data},
+            )
+        return props
+
+    def rename_file(
+        self,
+        token: str,
+        file_token: str,
+        title: str,
+        *,
+        file_type: str = "sheet",
+    ) -> Dict[str, Any]:
+        """Rename a Drive file. Spreadsheets use ``type=sheet`` and ``new_title``."""
+        url = f"{FEISHU_BASE}/drive/v1/files/{file_token}"
+        body = {"new_title": title}
+        params = {"type": file_type}
+        self._throttle("write")
+        resp = self._client.patch(
+            url, headers=self._headers(token), params=params, json=body
+        )
+        data = self._parse_json(resp)
+        code = data.get("code")
+        if code != 0 and isinstance(code, int) and code in RETRYABLE_CODES:
+            time.sleep(max(self.rate_limit.batch_delay_ms, 0) / 1000.0 * 2)
+            self._throttle("write")
+            resp = self._client.patch(
+                url, headers=self._headers(token), params=params, json=body
+            )
+            data = self._parse_json(resp)
+        self._raise_for_code(data, action="rename_file")
+        return data.get("data") or {}
+
     def get_spreadsheet_values(
         self,
         token: str,

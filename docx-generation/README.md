@@ -141,7 +141,7 @@ curl -X POST http://localhost:8060/api/generate \
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `file` | 文件 | 是 | 上传的 `.docx`。没有这个文件时返回 `invalid_template`。下载文件名用上传文件名，没有文件名时用 `filled.docx`。 |
+| `file` | 文件 | 是 | 上传的 `.docx`。没有这个文件时返回 `invalid_template`。上传文件名能对上已知合同时，下载名仍是签约抬头加订单号；对不上时用上传文件名，没有文件名时用 `filled.docx`。 |
 | `placeholders` | 字符串 | 是 | JSON 对象，规则与 JSON 请求相同。缺失或不是 JSON 时返回 `invalid_placeholders`。 |
 | `required` | 字符串 | 否 | JSON 数组。省略或空字符串时按 `[]`。 |
 | `empty_optional` | 字符串 | 否 | 普通文本，默认空字符串。 |
@@ -161,7 +161,7 @@ curl -X POST http://localhost:8060/api/generate \
 状态码 200。响应体是 docx 字节，服务不保存生成结果。
 
 - `Content-Type`：`application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-- `Content-Disposition`：`attachment; filename="..."; filename*=UTF-8''...`。JSON 请求的文件名是模板文件名，不含目录。
+- `Content-Disposition`：`attachment; filename="..."; filename*=UTF-8''...`。已知合同模板的下载名是签约抬头接上 `placeholders` 里的订单号，例如 `杭州富阳途臻活动策划工作室26087858.docx`。没有订单号时只有抬头。认不出的模板仍用模板文件名，不含目录。
 - `X-Docx-Unresolved`：仅在仍有未传入的 `{{key}}` 时出现。
 
 ### 常见报错

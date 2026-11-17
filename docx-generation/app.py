@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import quote
@@ -83,6 +84,27 @@ def resolve_template(template: str) -> Path:
     return candidate
 
 
+# 下载名用合同正文里的签约抬头，再接订单号。模板文件名只用来认出是哪一份抬头。
+SIGNING_TITLES = {
+    "富阳途臻合同模板.docx": "杭州富阳途臻活动策划工作室",
+    "趣伽团建合同模板.docx": "杭州趣伽团建策划有限公司",
+    "旅行社合同模板.docx": "杭州趣加旅行社服务有限公司",
+}
+_FILENAME_INVALID = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
+
+
+def output_filename(source_name: str, placeholders: dict[str, str]) -> str:
+    title = SIGNING_TITLES.get(Path(source_name).name)
+    if not title:
+        fallback = Path(source_name).name
+        return fallback or "filled.docx"
+    order = str(placeholders.get("订单号") or "").strip()
+    stem = _FILENAME_INVALID.sub("", f"{title}{order}").strip().strip(".")
+    if not stem:
+        stem = "filled"
+    return stem + ".docx"
+
+
 def content_disposition(name: str) -> str:
     base = Path(name).name.replace("\r", "").replace("\n", "").replace('"', "")
     if not base or base in {".", ".."}:
@@ -120,6 +142,7 @@ def _fill_response(
     filename: str,
     tables: object = None,
 ) -> Response:
+    filename = output_filename(filename, placeholders)
     try:
         prepared = normalize_tables(tables, empty_optional)
     except InvalidTable as exc:

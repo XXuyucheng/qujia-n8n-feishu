@@ -23,6 +23,8 @@ class GenerateRequest(BaseModel):
     tenant_access_token: Optional[str] = None
     signing_unit: Optional[str] = None
     document_name: Optional[str] = None
+    # 已有报价表格 token。有值时不新建文件，在该表内复制「空白模板」工作表再填充。
+    spreadsheet_token: Optional[str] = None
     fields: Optional[Dict[str, Any]] = None
     template_token: Optional[str] = None
     # Raw Feishu folder token (highest priority for output location)

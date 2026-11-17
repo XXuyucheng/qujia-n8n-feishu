@@ -11,7 +11,7 @@ from urllib.parse import quote, unquote
 
 from fastapi.testclient import TestClient
 
-from app import app
+from app import app, output_filename
 from test_fill import FILLED, build_sample_docx, paragraph_texts, parse_xml, zip_part
 
 DOCX_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -32,6 +32,30 @@ class GenerateApiTests(unittest.TestCase):
         else:
             os.environ["DOCX_TEMPLATES_DIR"] = self._old_templates
         self.tmp.cleanup()
+
+    def test_known_template_name_is_signing_title_plus_order(self) -> None:
+        self.assertEqual(
+            output_filename("富阳途臻合同模板.docx", {"订单号": "26087858"}),
+            "杭州富阳途臻活动策划工作室26087858.docx",
+        )
+        self.assertEqual(
+            output_filename("趣伽团建合同模板.docx", {"订单号": " 88 "}),
+            "杭州趣伽团建策划有限公司88.docx",
+        )
+        self.assertEqual(
+            output_filename("子目录/旅行社合同模板.docx", {}),
+            "杭州趣加旅行社服务有限公司.docx",
+        )
+        (self.root / "富阳途臻合同模板.docx").write_bytes(build_sample_docx())
+        resp = self.client.post(
+            "/api/generate",
+            json=self._body(template="富阳途臻合同模板.docx"),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            quote("杭州富阳途臻活动策划工作室26087858.docx", safe=""),
+            resp.headers["content-disposition"],
+        )
 
     def test_json_fills_split_run_and_warns(self) -> None:
         resp = self.client.post("/api/generate", json=self._body())
