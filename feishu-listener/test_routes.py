@@ -913,6 +913,27 @@ class OnlineQuoteMultiRouteTests(unittest.TestCase):
         by_id = find_route(self._event("optBRN6r2x"), self.routes)
         self.assertEqual(by_id.get("name"), "online-quote-multi")
 
+    def test_template_status_hits_template_route_only(self):
+        names = [route["name"] for route in self.routes]
+        self.assertLess(names.index("online-quote-multi"), names.index("online-quote-template"))
+        self.assertLess(names.index("online-quote-template"), names.index("order-deal-status-date"))
+        route = self.by_name["online-quote-template"]
+        self.assertEqual(route["actions"], "record_edited")
+        self.assertEqual(
+            route["n8n_webhook_url"],
+            "http://n8n:5678/webhook/feishu/quote-template",
+        )
+        self.assertEqual(
+            route["field_conditions"],
+            [{"field_id": "fldGQVeaKb", "equals": ["模板生成", "opt5pWthuK"]}],
+        )
+        self.assertEqual(find_route(self._event("模板生成"), self.routes).get("name"), "online-quote-template")
+        self.assertEqual(find_route(self._event("opt5pWthuK"), self.routes).get("name"), "online-quote-template")
+        self.assertEqual(find_route(self._event("optDK1JeDR"), self.routes).get("name"), "online-quote-generation")
+        self.assertEqual(find_route(self._event("optSrF4NkL"), self.routes).get("name"), "online-quote-generation")
+        self.assertEqual(find_route(self._event("多次生成"), self.routes).get("name"), "online-quote-multi")
+        self.assertEqual(find_route(self._event("optBRN6r2x"), self.routes).get("name"), "online-quote-multi")
+
 
 if __name__ == "__main__":
     unittest.main()
