@@ -257,6 +257,7 @@ class TableApiTests(unittest.TestCase):
         xml = zip_part(resp.content, "word/document.xml")
         texts = paragraph_texts(parse_xml(xml))
         self.assertNotIn("{{报价}}", texts)
+        self.assertIn("/", texts)
         self.assertNotIn("名称", texts)
         self.assertEqual(_tables(parse_xml(xml)), [])
         kept = splice_document(
@@ -273,6 +274,7 @@ class TableApiTests(unittest.TestCase):
             ),
         ).decode()
         self.assertNotIn("{{报价}}", kept)
+        self.assertIn("> / </w:t>".replace(" ", ""), kept)
         self.assertNotIn("<w:tbl", kept)
         self.assertIn("<w:br", kept)
         self.assertIn("附件2", kept)

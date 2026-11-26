@@ -118,12 +118,8 @@ def splice_document(xml: bytes, tables: list[Table]) -> bytes:
             raise TableAnchorDuplicate(table.anchor)
         paragraph = matches[0]
         if table.omit_when_empty and not table.rows:
-            edited = _cut_token(paragraph.xml, token, paragraph.prefix)
-            if _paragraph_text(edited).strip() or re.search(rf"<{paragraph.prefix}:br\b", edited):
-                built = edited
-            else:
-                built = ""
-            replacements.append((paragraph.start, paragraph.end, built))
+            edited = _replace_token(paragraph.xml, token, paragraph.prefix, "/")
+            replacements.append((paragraph.start, paragraph.end, edited))
             continue
         widths = _column_widths(table.columns, _text_width(text, paragraph))
         built = _render_table(paragraph, table, widths)
@@ -282,6 +278,49 @@ class _TextNode:
     content_start: int
     content_end: int
     element_start: int
+
+
+def _replace_token(xml: str, token: str, prefix: str, replacement: str) -> str:
+    nodes = _indexed_text_nodes(xml)
+    joined = "".join(node.text for node in nodes)
+    start = joined.find(token)
+    if start < 0:
+        return xml
+    end = start + len(token)
+    edits: list[tuple[int, int, str]] = []
+    consumed: set[int] = set()
+    placed = False
+    for node in nodes:
+        if node.joined_end <= start or node.joined_start >= end or id(node) in consumed:
+            continue
+        local_start = max(0, start - node.joined_start)
+        local_end = min(len(node.text), end - node.joined_start)
+        if placed:
+            run = _run_bounds(xml, node.element_start, prefix)
+            if run is not None:
+                run_xml = xml[run[0] : run[1]]
+                run_nodes = [
+                    item
+                    for item in nodes
+                    if run[0] <= item.element_start and item.content_end <= run[1]
+                ]
+                fully = all(start <= item.joined_start and item.joined_end <= end for item in run_nodes)
+                structural = re.search(rf"<{prefix}:(br|tab|drawing|object|pict)\b", run_xml)
+                if fully and run_nodes and not structural and all(id(item) not in consumed for item in run_nodes):
+                    edits.append((run[0], run[1], ""))
+                    consumed.update(id(item) for item in run_nodes)
+                    continue
+            kept = node.text[:local_start] + node.text[local_end:]
+            edits.append((node.content_start, node.content_end, _xml_text(kept)))
+            consumed.add(id(node))
+            continue
+        kept = node.text[:local_start] + replacement + node.text[local_end:]
+        edits.append((node.content_start, node.content_end, _xml_text(kept)))
+        consumed.add(id(node))
+        placed = True
+    for edit_start, edit_end, text in sorted(edits, reverse=True):
+        xml = xml[:edit_start] + text + xml[edit_end:]
+    return xml
 
 
 def _cut_token(xml: str, token: str, prefix: str) -> str:
