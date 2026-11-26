@@ -50,6 +50,7 @@ class Table:
     header: bool
     borders: bool
     empty_cell: str
+    omit_when_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,14 @@ def splice_document(xml: bytes, tables: list[Table]) -> bytes:
         if len(matches) > 1 or any(paragraph.text.count(token) > 1 for paragraph in matches):
             raise TableAnchorDuplicate(table.anchor)
         paragraph = matches[0]
+        if table.omit_when_empty and not table.rows:
+            edited = _cut_token(paragraph.xml, token, paragraph.prefix)
+            if _paragraph_text(edited).strip() or re.search(rf"<{paragraph.prefix}:br\b", edited):
+                built = edited
+            else:
+                built = ""
+            replacements.append((paragraph.start, paragraph.end, built))
+            continue
         widths = _column_widths(table.columns, _text_width(text, paragraph))
         built = _render_table(paragraph, table, widths)
         edited = _cut_token(paragraph.xml, token, paragraph.prefix)
@@ -153,13 +162,16 @@ def _normalize_table(item: object, empty_optional: str) -> Table:
     borders = item.get("borders", True)
     if not isinstance(header, bool) or not isinstance(borders, bool):
         raise InvalidTable("header and borders must be booleans")
+    omit_when_empty = item.get("omit_when_empty", False)
+    if not isinstance(omit_when_empty, bool):
+        raise InvalidTable("omit_when_empty must be a boolean")
     if "empty_cell" in item and item.get("empty_cell") is not None:
         empty_cell = item.get("empty_cell")
         if not isinstance(empty_cell, str):
             raise InvalidTable("empty_cell must be a string")
     else:
         empty_cell = empty_optional
-    return Table(anchor.strip(), columns, tuple(rows), header, borders, empty_cell)
+    return Table(anchor.strip(), columns, tuple(rows), header, borders, empty_cell, omit_when_empty)
 
 
 def _normalize_column(item: object) -> Column:

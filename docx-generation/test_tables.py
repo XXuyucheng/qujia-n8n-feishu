@@ -16,7 +16,7 @@ from lxml import etree
 
 from app import app
 from fill import fill_docx
-from tables import apply_tables, normalize_tables
+from tables import apply_tables, normalize_tables, splice_document
 from test_fill import paragraph_texts, parse_xml, zip_part
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -236,6 +236,46 @@ class TableApiTests(unittest.TestCase):
         self.assertIn("甲方名称", unresolved)
         rows = _row_texts(_tables(parse_xml(zip_part(resp.content, "word/document.xml")))[0])
         self.assertEqual(rows, [["名称"]])
+
+    def test_omit_when_empty_drops_anchor_without_a_header(self) -> None:
+        resp = self.client.post(
+            "/api/generate",
+            json={
+                "template": "迷你.docx",
+                "placeholders": {},
+                "tables": [
+                    {
+                        "anchor": "报价",
+                        "columns": [{"key": "名称"}],
+                        "rows": [],
+                        "omit_when_empty": True,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.text)
+        xml = zip_part(resp.content, "word/document.xml")
+        texts = paragraph_texts(parse_xml(xml))
+        self.assertNotIn("{{报价}}", texts)
+        self.assertNotIn("名称", texts)
+        self.assertEqual(_tables(parse_xml(xml)), [])
+        kept = splice_document(
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>{{报价}}</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>
+    <w:p><w:r><w:t>附件2</w:t></w:r></w:p>
+  </w:body>
+</w:document>
+""".encode(),
+            normalize_tables(
+                [{"anchor": "报价", "columns": [{"key": "名称"}], "rows": [], "omit_when_empty": True}]
+            ),
+        ).decode()
+        self.assertNotIn("{{报价}}", kept)
+        self.assertNotIn("<w:tbl", kept)
+        self.assertIn("<w:br", kept)
+        self.assertIn("附件2", kept)
 
     def test_missing_anchor_and_bad_cell_do_not_return_a_docx(self) -> None:
         missing = self.client.post(
