@@ -9,7 +9,7 @@ import zipfile
 from lxml import etree
 
 from fill import fill_docx
-from values import MissingRequired, prepare_values
+from values import prepare_values
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 W_P = f"{{{W}}}p"
@@ -181,14 +181,14 @@ class PrepareValuesTests(unittest.TestCase):
         self.assertEqual(got["甲方税号"], "/")
         self.assertEqual(got["途径地"], "桐庐")
 
-    def test_missing_required_does_not_apply_slash(self) -> None:
-        with self.assertRaises(MissingRequired) as caught:
-            prepare_values(
-                {"甲方名称": "", "甲方税号": ""},
-                required=["甲方名称"],
-                empty_optional="/",
-            )
-        self.assertEqual(caught.exception.missing, ["甲方名称"])
+    def test_blank_value_becomes_slash_even_when_listed_required(self) -> None:
+        got = prepare_values(
+            {"甲方名称": "", "甲方税号": ""},
+            required=["甲方名称"],
+            empty_optional="/",
+        )
+        self.assertEqual(got["甲方名称"], "/")
+        self.assertEqual(got["甲方税号"], "/")
 
 
 class FillDocxTests(unittest.TestCase):
@@ -207,13 +207,13 @@ class FillDocxTests(unittest.TestCase):
         self.assertIn("/", texts)
         self.assertIn("第一句第二句", texts)
         self.assertIn("杭州-千岛湖", texts)
-        self.assertIn("{{保险名称}}", texts)
+        self.assertNotIn("{{保险名称}}", texts)
         self.assertIn("上一段{{途", texts)
         self.assertIn("径地}}下一段", texts)
         self.assertNotIn("上一段桐庐下一段", texts)
         self.assertTrue(bold_prefix_kept(document))
         self.assertTrue(document.find(f".//{W_BR}") is not None)
-        self.assertEqual(unresolved, ["保险名称"])
+        self.assertEqual(unresolved, [])
         document_xml = zip_part(filled, "word/document.xml").decode("utf-8")
         self.assertIn('w:eastAsia="仿宋"', document_xml)
         self.assertIn('w:firstLine="480"', document_xml)

@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from urllib.parse import unquote
-
 from fastapi.testclient import TestClient
 from lxml import etree
 
@@ -231,9 +228,9 @@ class TableApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         texts = paragraph_texts(parse_xml(zip_part(resp.content, "word/document.xml")))
         self.assertNotIn("{{报价}}", texts)
-        unresolved = json.loads(unquote(resp.headers["x-docx-unresolved"]))
-        self.assertNotIn("报价", unresolved)
-        self.assertIn("甲方名称", unresolved)
+        self.assertNotIn("{{甲方名称}}", texts)
+        self.assertIn("后文/", texts)
+        self.assertNotIn("x-docx-unresolved", resp.headers)
         xml = zip_part(resp.content, "word/document.xml")
         self.assertIn("/", texts)
         self.assertEqual(_tables(parse_xml(xml)), [])
@@ -371,8 +368,9 @@ class ContractTemplateTests(unittest.TestCase):
         after = _zip_parts(filled)
         self.assertEqual(set(before), set(after))
         for name, payload in before.items():
-            if name != "word/document.xml":
-                self.assertEqual(after[name], payload, name)
+            if name == "word/document.xml" or _is_header_or_footer(name):
+                continue
+            self.assertEqual(after[name], payload, name)
         xml = after["word/document.xml"].decode("utf-8")
         self.assertEqual(before_xml.count("firstLine"), xml.count("firstLine"))
         self.assertEqual(before_xml.count('w:type="page"'), xml.count('w:type="page"'))
@@ -402,6 +400,11 @@ class ContractTemplateTests(unittest.TestCase):
         self.assertIn('w:w="8306"', xml)
         self.assertIn("<w:tblLayout w:type=\"fixed\"/>", xml)
         self.assertIn('w:eastAsia="宋体"', xml[xml.find("<w:tbl>"):xml.find("</w:tbl>")])
+
+
+def _is_header_or_footer(name: str) -> bool:
+    leaf = name.rsplit("/", 1)[-1]
+    return (leaf.startswith("header") or leaf.startswith("footer")) and leaf.endswith(".xml")
 
 
 def _zip_parts(data: bytes) -> dict[str, bytes]:

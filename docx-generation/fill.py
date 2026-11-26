@@ -15,6 +15,7 @@ W_T = f"{{{W}}}t"
 W_BR = f"{{{W}}}br"
 
 PLACEHOLDER_RE = re.compile(r"\{\{([^{}]+)\}\}")
+MISSING_PLACEHOLDER = "/"
 
 
 class InvalidDocx(Exception):
@@ -90,9 +91,10 @@ def _replace_in_paragraph(
     full = "".join((node.text or "") for node in nodes)
     for match in reversed(list(PLACEHOLDER_RE.finditer(full))):
         key = match.group(1).strip()
-        if not key or key not in values:
+        if not key:
             continue
-        _apply_span(spans, match.start(), match.end(), str(values[key]), edits, extras, original_ids)
+        replacement = values[key] if key in values else MISSING_PLACEHOLDER
+        _apply_span(spans, match.start(), match.end(), str(replacement), edits, extras, original_ids)
 
 
 def _apply_span(

@@ -22,7 +22,7 @@ from tables import (
     apply_tables,
     normalize_tables,
 )
-from values import MissingRequired, prepare_values
+from values import prepare_values
 
 HOST = os.getenv("DOCX_GENERATION_HOST", "0.0.0.0")
 PORT = int(os.getenv("DOCX_GENERATION_PORT", "8060"))
@@ -149,10 +149,7 @@ def _fill_response(
         return _invalid_tables(exc.message)
     except TableAnchorDuplicate as exc:
         return _error(400, {"error": "table_anchor_duplicate", "anchor": exc.anchor})
-    try:
-        values = prepare_values(placeholders, required, empty_optional)
-    except MissingRequired as exc:
-        return _error(400, {"error": "missing_required", "missing": exc.missing})
+    values = prepare_values(placeholders, required, empty_optional)
     try:
         if prepared:
             data = apply_tables(data, prepared)

@@ -45,11 +45,11 @@ curl http://localhost:8060/health
 | --- | --- | --- | --- | --- |
 | `template` | string | 是 | | 模板目录里的相对路径，必须以 `.docx` 结尾，可以带子目录，例如 `旅行社合同模板.docx`、`合同/旅行社合同模板.docx`。服务会去掉首尾空白。空字符串、绝对路径、路径中含 `..`、后缀不是 `.docx`，返回 `template_path_invalid`。目录里没有这个文件，返回 `template_not_found`。多份模板放进同一目录，调用时改这个字符串。 |
 | `placeholders` | object | 是 | | 键是占位符名字，不含花括号。模板里的 `{{甲方名称}}` 对应键 `甲方名称`。值必须是字符串。数字、null、数组、对象会使整个请求返回 `invalid_placeholders`。字符串中的 `\n` 写成 Word 换行。 |
-| `required` | string[] | 否 | `[]` | 这些键缺失，或去掉空白后为空，返回 `missing_required`，响应里带 `missing` 数组，不返回 docx。 |
-| `empty_optional` | string | 否 | `""` | `placeholders` 里出现了、又不在 `required` 里、去掉空白后为空的值，替换成这个字符串。合同场景传 `"/"`。 |
+| `required` | string[] | 否 | `[]` | 仍可传入，服务不据此拒绝生成。缺哪些字段由调用方自己拦截。 |
+| `empty_optional` | string | 否 | `""` | `placeholders` 里出现了、去掉空白后为空的值，替换成这个字符串。合同场景传 `"/"`。 |
 | `tables` | array | 否 | 省略 | 省略或 `null` 时只做文字替换。每一项在正文里插一张表，然后再做文字替换。 |
 
-没出现在 `placeholders` 里的 `{{key}}` 留在原文中。成功响应若仍有这种键，响应头 `X-Docx-Unresolved` 是这些键组成的 JSON 数组，按 UTF-8 做百分号编码。
+模板里有、这次请求没传到的 `{{key}}` 写成 `/`。服务不因为缺字段拒绝生成。
 
 文字替换覆盖正文、已有表格单元格、页眉和页脚。同一段落里被 Word 拆开的 `{{key}}` 会先拼回再替换。
 
@@ -91,7 +91,6 @@ curl http://localhost:8060/health
 {
   "template": "旅行社合同模板.docx",
   "placeholders": {"甲方名称": "示例公司", "甲方税号": ""},
-  "required": ["甲方名称"],
   "empty_optional": "/",
   "tables": [
     {
@@ -126,7 +125,7 @@ curl http://localhost:8060/health
 }
 ```
 
-报价表的 `rows` 对应费用明细，行程表的 `rows` 对应活动行程。`甲方税号` 传了空字符串且不在 `required` 里，文档里写成 `/`。
+报价表的 `rows` 对应费用明细，行程表的 `rows` 对应活动行程。`甲方税号` 传了空字符串，文档里写成 `/`。模板里还有、这次没传的占位符也写成 `/`。
 
 ```bash
 curl -X POST http://localhost:8060/api/generate \
@@ -143,7 +142,7 @@ curl -X POST http://localhost:8060/api/generate \
 | --- | --- | --- | --- |
 | `file` | 文件 | 是 | 上传的 `.docx`。没有这个文件时返回 `invalid_template`。上传文件名能对上已知合同时，下载名仍是签约抬头加订单号；对不上时用上传文件名，没有文件名时用 `filled.docx`。 |
 | `placeholders` | 字符串 | 是 | JSON 对象，规则与 JSON 请求相同。缺失或不是 JSON 时返回 `invalid_placeholders`。 |
-| `required` | 字符串 | 否 | JSON 数组。省略或空字符串时按 `[]`。 |
+| `required` | 字符串 | 否 | JSON 数组。省略或空字符串时按 `[]`。服务不据此拒绝生成。 |
 | `empty_optional` | 字符串 | 否 | 普通文本，默认空字符串。 |
 | `tables` | 字符串 | 否 | JSON 数组，规则与 JSON 请求相同。不是合法 JSON 时返回 `invalid_tables`，`message` 为 `tables is not json`。 |
 
@@ -151,7 +150,6 @@ curl -X POST http://localhost:8060/api/generate \
 curl -X POST http://localhost:8060/api/generate \
   -F 'file=@旅行社合同模板.docx' \
   -F 'placeholders={"甲方名称":"示例公司","甲方税号":""}' \
-  -F 'required=["甲方名称"]' \
   -F 'empty_optional=/' \
   -o contract.docx
 ```
@@ -162,7 +160,7 @@ curl -X POST http://localhost:8060/api/generate \
 
 - `Content-Type`：`application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 - `Content-Disposition`：`attachment; filename="..."; filename*=UTF-8''...`。已知合同模板的下载名是签约抬头接上 `placeholders` 里的订单号，例如 `杭州富阳途臻活动策划工作室26087858.docx`。没有订单号时只有抬头。认不出的模板仍用模板文件名，不含目录。
-- `X-Docx-Unresolved`：仅在仍有未传入的 `{{key}}` 时出现。
+- `X-Docx-Unresolved`：请求没传到的占位符已经写成 `/`，正常生成不再带这个头。只有替换后正文里仍剩完整的 `{{key}}` 时才会出现。
 
 ### 常见报错
 
@@ -183,7 +181,6 @@ curl -X POST http://localhost:8060/api/generate \
 | `{"error":"template_path_invalid","template":"../a.docx"}` | 去掉空白后为空、是绝对路径、路径含 `..`，或后缀不是 `.docx`。`template` 回显处理后的字符串，空白时是 `""` |
 | `{"error":"template_not_found","template":"没有.docx"}` | 模板目录里没有这个相对路径 |
 | `{"error":"invalid_template"}` | 文件不是合法 docx，或 multipart 没有 `file`。内部原因不出现在响应里 |
-| `{"error":"missing_required","missing":["订单号","甲方名称"]}` | 必填键缺失，或去掉空白后为空。`missing` 按请求里的先后顺序，重复键只保留一次 |
 | `{"error":"table_anchor_not_found","anchor":"没有这行"}` | 正文里没有 `{{anchor}}`。`anchor` 是去掉空白后的名字 |
 | `{"error":"table_anchor_duplicate","anchor":"报价"}` | 同一次请求里锚点重复，或正文里同一个锚点出现多次 |
 

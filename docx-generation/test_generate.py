@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
@@ -65,11 +65,8 @@ class GenerateApiTests(unittest.TestCase):
         self.assertIn("filename*=UTF-8''", resp.headers["content-disposition"])
         texts = paragraph_texts(parse_xml(zip_part(resp.content, "word/document.xml")))
         self.assertIn("桐庐", texts)
-        self.assertIn("{{保险名称}}", texts)
-        self.assertEqual(
-            json.loads(unquote(resp.headers["x-docx-unresolved"])),
-            ["保险名称"],
-        )
+        self.assertNotIn("{{保险名称}}", texts)
+        self.assertNotIn("x-docx-unresolved", resp.headers)
 
     def test_no_unresolved_header_when_every_key_is_given(self) -> None:
         placeholders = dict(FILLED)
@@ -107,7 +104,7 @@ class GenerateApiTests(unittest.TestCase):
             {"error": "template_not_found", "template": "missing.docx"},
         )
 
-    def test_missing_required_returns_json(self) -> None:
+    def test_blank_required_still_returns_docx(self) -> None:
         resp = self.client.post(
             "/api/generate",
             json=self._body(
@@ -115,12 +112,11 @@ class GenerateApiTests(unittest.TestCase):
                 required=["甲方名称"],
             ),
         )
-        self.assertEqual(resp.status_code, 400)
-        self.assertEqual(
-            resp.json(),
-            {"error": "missing_required", "missing": ["甲方名称"]},
-        )
-        self.assertFalse(resp.content.startswith(b"PK"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.content.startswith(b"PK"))
+        texts = paragraph_texts(parse_xml(zip_part(resp.content, "word/document.xml")))
+        self.assertIn("加粗/", texts)
+        self.assertNotIn("{{保险名称}}", texts)
 
     def test_non_string_placeholder_is_400(self) -> None:
         resp = self.client.post(
