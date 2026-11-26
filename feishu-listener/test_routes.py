@@ -652,6 +652,68 @@ class InvoiceAttachmentChangedTests(unittest.TestCase):
         self.assertEqual(added_match.get("name"), "invoice-application-recognize")
 
 
+def make_invoice_lock_event(action="record_edited", before="", after="", extra_after=None):
+    after_value = []
+    if after:
+        after_value.append({"field_id": "fld5AcIqaR", "field_value": after})
+    if extra_after:
+        after_value.extend(extra_after)
+    before_value = []
+    if before:
+        before_value.append({"field_id": "fld5AcIqaR", "field_value": before})
+    raw = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "invoice-lock-protect",
+            "create_time": "1793070283000",
+            "event_type": "drive.file.bitable_record_changed_v1",
+            "tenant_key": "debug",
+            "app_id": "cli_debug",
+        },
+        "event": {
+            "file_token": "Y2ZgbUGWqa0MB4sLmXxc89T5n0P",
+            "file_type": "bitable",
+            "table_id": "tbl1qdQwcE3jEjlR",
+            "action_list": [
+                {
+                    "action": action,
+                    "record_id": "recInvoiceLock001",
+                    "before_value": before_value,
+                    "after_value": after_value,
+                }
+            ],
+        },
+    }
+    return normalize_event(raw)
+
+
+class InvoiceLockProtectRouteTests(unittest.TestCase):
+    def test_locked_edit_beats_recognition_and_status_leave_or_delete_is_separate(self):
+        import yaml
+
+        config = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text(encoding="utf-8"))
+        names = [route["name"] for route in config["routes"]]
+        self.assertLess(names.index("invoice-lock-protect"), names.index("invoice-application-recognize"))
+        self.assertLess(names.index("invoice-lock-status-changed"), names.index("invoice-application-recognize"))
+        self.assertLess(names.index("invoice-lock-deleted"), names.index("record_deleted_backup"))
+
+        locked_with_file = make_invoice_lock_event(
+            before="optUxpWa8z",
+            after="optF3S41zb",
+            extra_after=[{"field_id": "fldleNcqtc", "field_value": attachment_field_value("a.pdf", "boxcnNew")}],
+        )
+        self.assertEqual(find_route(locked_with_file, config["routes"]).get("name"), "invoice-lock-protect")
+
+        left_lock = make_invoice_lock_event(before="optF3S41zb", after="optG7ctdUj")
+        self.assertEqual(find_route(left_lock, config["routes"]).get("name"), "invoice-lock-status-changed")
+
+        deleted = make_invoice_lock_event(action="record_deleted", before="optF3S41zb")
+        self.assertEqual(find_route(deleted, config["routes"]).get("name"), "invoice-lock-deleted")
+
+        unlocked_delete = make_invoice_lock_event(action="record_deleted", before="optUxpWa8z")
+        self.assertEqual(find_route(unlocked_delete, config["routes"]).get("name"), "record_deleted_backup")
+
+
 def make_contract_submit_event(signing_unit=None, status="opt3Grubt2"):
     after = [{"field_id": "fldKtkrkNU", "field_value": status}]
     if signing_unit is not None:

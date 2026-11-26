@@ -35,6 +35,35 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/invoice-tax-status
     max_attempts: 2
     timeout_seconds: 25
+  # 发票申请数据保护。先匹配先停，必须写在发票识别前面。
+  # 变更后仍是「开票中禁止更改」：刚进入锁定，或锁定期间任意字段变动。
+  - name: invoice-lock-protect
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl1qdQwcE3jEjlR
+    actions: record_edited
+    field_conditions:
+      - field_id: fld5AcIqaR
+        equals: optF3S41zb
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice-lock-protect
+    max_attempts: 2
+    timeout_seconds: 25
+  # 开票状态被改走时，变更后的值不再是锁定选项，上一条 equals 抓不到。
+  - name: invoice-lock-status-changed
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl1qdQwcE3jEjlR
+    actions: record_edited
+    field_conditions:
+      - field_id: fld5AcIqaR
+        changed: true
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice-lock-protect
+    max_attempts: 2
+    timeout_seconds: 25
   # 发票申请表：发票附件变化就识别这一条。回写识别状态不会再次命中，因为只比较附件前后。
   - name: invoice-application-recognize
     enabled: true
@@ -115,6 +144,20 @@ routes:
     n8n_webhook_url: http://n8n:5678/webhook/order-deal-status-date
     max_attempts: 3
     timeout_seconds: 10
+  # 锁定中的发票申请被删除时先重建。必须写在无表限制的删除存档前面。
+  - name: invoice-lock-deleted
+    enabled: true
+    dispatch_enabled: true
+    event_type: drive.file.bitable_record_changed_v1
+    app_token: Y2ZgbUGWqa0MB4sLmXxc89T5n0P
+    table_id: tbl1qdQwcE3jEjlR
+    actions: record_deleted
+    field_conditions:
+      - field_id: fld5AcIqaR
+        equals: optF3S41zb
+    n8n_webhook_url: http://n8n:5678/webhook/feishu/invoice-lock-protect
+    max_attempts: 2
+    timeout_seconds: 25
   - name: record_deleted_backup #删除数据存档
     enabled: true
     dispatch_enabled: true
