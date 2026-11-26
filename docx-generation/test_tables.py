@@ -234,8 +234,9 @@ class TableApiTests(unittest.TestCase):
         unresolved = json.loads(unquote(resp.headers["x-docx-unresolved"]))
         self.assertNotIn("报价", unresolved)
         self.assertIn("甲方名称", unresolved)
-        rows = _row_texts(_tables(parse_xml(zip_part(resp.content, "word/document.xml")))[0])
-        self.assertEqual(rows, [["名称"]])
+        xml = zip_part(resp.content, "word/document.xml")
+        self.assertIn("/", texts)
+        self.assertEqual(_tables(parse_xml(xml)), [])
 
     def test_omit_when_empty_drops_anchor_without_a_header(self) -> None:
         resp = self.client.post(

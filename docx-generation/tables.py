@@ -117,7 +117,7 @@ def splice_document(xml: bytes, tables: list[Table]) -> bytes:
         if len(matches) > 1 or any(paragraph.text.count(token) > 1 for paragraph in matches):
             raise TableAnchorDuplicate(table.anchor)
         paragraph = matches[0]
-        if table.omit_when_empty and not table.rows:
+        if not table.rows:
             edited = _replace_token(paragraph.xml, token, paragraph.prefix, "/")
             replacements.append((paragraph.start, paragraph.end, edited))
             continue

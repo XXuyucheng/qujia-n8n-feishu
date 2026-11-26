@@ -59,7 +59,7 @@ curl http://localhost:8060/health
 | --- | --- | --- | --- | --- |
 | `anchor` | string | 是 | | 花括号里面的名字。模板写 `{{报价}}` 时这里传 `报价`。不能包含 `{` 或 `}`。 |
 | `columns` | array | 是 | | 至少一列。 |
-| `rows` | array | 否 | `[]` | 每个元素是一个对象，键对应列的 `key`。空数组只生成表头，并去掉占位符。 |
+| `rows` | array | 否 | `[]` | 每个元素是一个对象，键对应列的 `key`。空数组不生成表，占位符写成 `/`。 |
 | `header` | boolean | 否 | `true` | `true` 时写出表头行，表头加粗，并在跨页时重复。`false` 时不写表头行。 |
 | `borders` | boolean | 否 | `true` | `true` 时六边为单线。`false` 时不写边框。 |
 | `empty_cell` | string | 否 | 同 `empty_optional` | 单元格为 null、这一列没有键、或去掉空白后为空时写入的文字。字段省略或值为 null 时，用 `empty_optional`。 |
